@@ -1,6 +1,6 @@
 module github.com/cerberauth/x
 
-go 1.22.0
+go 1.22.2
 
 require (
 	go.opentelemetry.io/otel v1.25.0
