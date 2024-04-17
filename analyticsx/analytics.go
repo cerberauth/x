@@ -9,9 +9,10 @@ import (
 )
 
 type AppInfo struct {
-	Name string
+	Name    string
+	Version string
 }
 
 func NewAnalytics(ctx context.Context, app AppInfo) (*sdktrace.TracerProvider, error) {
-	return otelx.InitTracerProvider(ctx, app.Name, otlptracehttp.WithEndpointURL("https://telemetry.cerberauth.com"))
+	return otelx.InitTracerProvider(ctx, app.Name, app.Version, otlptracehttp.WithEndpointURL("https://telemetry.cerberauth.com"))
 }

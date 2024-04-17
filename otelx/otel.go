@@ -16,13 +16,14 @@ var (
 	initResourcesOnce sync.Once
 )
 
-func InitResource(serviceName string) *sdkresource.Resource {
+func InitResource(serviceName string, version string) *sdkresource.Resource {
 	initResourcesOnce.Do(func() {
 		extraResources, _ := sdkresource.New(
 			context.Background(),
 			sdkresource.WithOS(),
 			sdkresource.WithAttributes(
 				semconv.ServiceName(serviceName),
+				semconv.ServiceVersion(version),
 			),
 		)
 		resource, _ = sdkresource.Merge(
@@ -33,14 +34,14 @@ func InitResource(serviceName string) *sdkresource.Resource {
 	return resource
 }
 
-func InitTracerProvider(ctx context.Context, serviceName string, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
+func InitTracerProvider(ctx context.Context, serviceName string, version string, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
 	exporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSyncer(exporter),
-		sdktrace.WithResource(InitResource(serviceName)),
+		sdktrace.WithResource(InitResource(serviceName, version)),
 	)
 	otel.SetTracerProvider(tp)
 	return tp, nil
