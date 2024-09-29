@@ -35,6 +35,8 @@ func InitResource(serviceName string, version string) *sdkresource.Resource {
 }
 
 func InitTracerProvider(ctx context.Context, serviceName string, version string, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
+	opts = append(opts, otlptracehttp.WithEndpointURL("https://telemetry.cerberauth.com"))
+
 	exporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, err
