@@ -13,6 +13,6 @@ type AppInfo struct {
 	Version string
 }
 
-func NewAnalytics(ctx context.Context, app AppInfo) (*sdktrace.TracerProvider, error) {
-	return otelx.InitTracerProvider(ctx, app.Name, app.Version, otlptracehttp.WithEndpointURL("https://telemetry.cerberauth.com"))
+func NewAnalytics(ctx context.Context, app AppInfo, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
+	return otelx.InitTracerProvider(ctx, app.Name, app.Version, opts...)
 }
