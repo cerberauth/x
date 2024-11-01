@@ -1,0 +1,22 @@
+linters:
+  enable:
+    - cyclop
+    - errcheck
+    - goconst
+    - gocritic
+    - gofmt
+    - goimports
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - whitespace
+
+issues:
+  exclude-files:
+    - ".+_test.go"
+
+
