@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/cerberauth/x/otelx"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -13,6 +13,7 @@ type AppInfo struct {
 	Version string
 }
 
-func NewAnalytics(ctx context.Context, app AppInfo, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
-	return otelx.InitTracerProvider(ctx, app.Name, app.Version, opts...)
+func NewAnalytics(ctx context.Context, app AppInfo) (*metric.Meter, *sdktrace.TracerProvider, error) {
+	_, met, tp, err := otelx.New(ctx, app.Name, app.Version)
+	return met, tp, err
 }
