@@ -59,14 +59,13 @@ func initResource(serviceName string, version string) *sdkresource.Resource {
 }
 
 func InitMetric(ctx context.Context, res *sdkresource.Resource, serviceName string, opts ...otlpmetrichttp.Option) (*metric.Meter, *otlpmetrichttp.Exporter, error) {
-	opts = append(
+	exporter, err := otlpmetrichttp.New(ctx, append(
 		opts,
 		otlpmetrichttp.WithCompression(otlpmetrichttp.GzipCompression),
 		otlpmetrichttp.WithTimeout(timeout),
 		otlpmetrichttp.WithRetry(otlpmetrichttp.RetryConfig{Enabled: false}),
 		otlpmetrichttp.WithEndpointURL(otelEndpoint),
-	)
-	exporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(otelEndpoint))
+	)...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,14 +74,13 @@ func InitMetric(ctx context.Context, res *sdkresource.Resource, serviceName stri
 }
 
 func InitTracerProvider(ctx context.Context, res *sdkresource.Resource, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
-	opts = append(
+	exporter, err := otlptracehttp.New(ctx, append(
 		opts,
 		otlptracehttp.WithCompression(otlptracehttp.GzipCompression),
 		otlptracehttp.WithTimeout(timeout),
 		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{Enabled: false}),
 		otlptracehttp.WithEndpointURL(otelEndpoint),
-	)
-	exporter, err := otlptracehttp.New(ctx, opts...)
+	)...)
 	if err != nil {
 		return nil, err
 	}
