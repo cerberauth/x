@@ -8,7 +8,6 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.31.0
 	go.opentelemetry.io/otel/metric v1.31.0
 	go.opentelemetry.io/otel/sdk v1.31.0
-	go.opentelemetry.io/otel/trace v1.31.0
 )
 
 require (
@@ -19,6 +18,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.23.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.31.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.31.0 // indirect
+	go.opentelemetry.io/otel/trace v1.31.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	golang.org/x/net v0.30.0 // indirect
 	golang.org/x/sys v0.26.0 // indirect
