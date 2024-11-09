@@ -24,22 +24,7 @@ const (
 	timeout      = 2 * time.Second
 )
 
-func New(ctx context.Context, serviceName string, version string) (*sdkresource.Resource, *metric.Meter, *sdktrace.TracerProvider, error) {
-	res := initResource(serviceName, version)
-	meter, _, err := InitMetric(ctx, res, serviceName)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	tp, err := InitTracerProvider(ctx, res)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return res, meter, tp, nil
-}
-
-func initResource(serviceName string, version string) *sdkresource.Resource {
+func InitResource(serviceName string, version string) *sdkresource.Resource {
 	initResourcesOnce.Do(func() {
 		extraResources, _ := sdkresource.New(
 			context.Background(),
@@ -56,6 +41,21 @@ func initResource(serviceName string, version string) *sdkresource.Resource {
 	})
 
 	return resource
+}
+
+func New(ctx context.Context, serviceName string, version string) (*sdkresource.Resource, *metric.Meter, *sdktrace.TracerProvider, error) {
+	res := InitResource(serviceName, version)
+	meter, _, err := InitMetric(ctx, res, serviceName)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	tp, err := InitTracerProvider(ctx, res)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return res, meter, tp, nil
 }
 
 func InitMetric(ctx context.Context, res *sdkresource.Resource, serviceName string, opts ...otlpmetrichttp.Option) (*metric.Meter, *otlpmetrichttp.Exporter, error) {
