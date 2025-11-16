@@ -72,7 +72,7 @@ func InitTracerProvider(ctx context.Context, res *resource.Resource, opts ...otl
 		return nil, err
 	}
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSyncer(exporter),
+		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(tp)
