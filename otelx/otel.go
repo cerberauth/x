@@ -21,7 +21,7 @@ var (
 
 const (
 	otelEndpoint = "https://telemetry.cerberauth.com"
-	timeout      = 2 * time.Second
+	timeout      = 1 * time.Second
 )
 
 func InitResource(serviceName string, version string) *sdkresource.Resource {
