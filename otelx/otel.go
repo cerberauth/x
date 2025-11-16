@@ -2,21 +2,15 @@ package otelx
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/metric"
-	sdkresource "go.opentelemetry.io/otel/sdk/resource"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
-)
-
-var (
-	resource          *sdkresource.Resource
-	initResourcesOnce sync.Once
+	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
 const (
@@ -24,26 +18,19 @@ const (
 	timeout      = 1 * time.Second
 )
 
-func InitResource(serviceName string, version string) *sdkresource.Resource {
-	initResourcesOnce.Do(func() {
-		extraResources, _ := sdkresource.New(
-			context.Background(),
-			sdkresource.WithOS(),
-			sdkresource.WithAttributes(
-				semconv.ServiceName(serviceName),
-				semconv.ServiceVersion(version),
-			),
-		)
-		resource, _ = sdkresource.Merge(
-			sdkresource.Default(),
-			extraResources,
-		)
-	})
+func InitResource(serviceName string, version string) *resource.Resource {
+	res, _ := resource.New(
+		context.Background(),
+		resource.WithTelemetrySDK(),
+		resource.WithOS(),
+		resource.WithProcessRuntimeVersion(),
+		resource.WithAttributes(semconv.ServiceNameKey.String(serviceName), semconv.ServiceVersionKey.String(version)),
+	)
 
-	return resource
+	return res
 }
 
-func New(ctx context.Context, serviceName string, version string) (*sdkresource.Resource, *metric.Meter, *sdktrace.TracerProvider, error) {
+func New(ctx context.Context, serviceName string, version string) (*resource.Resource, *metric.Meter, *sdktrace.TracerProvider, error) {
 	res := InitResource(serviceName, version)
 	meter, _, err := InitMetric(ctx, res, serviceName)
 	if err != nil {
@@ -58,7 +45,7 @@ func New(ctx context.Context, serviceName string, version string) (*sdkresource.
 	return res, meter, tp, nil
 }
 
-func InitMetric(ctx context.Context, res *sdkresource.Resource, serviceName string, opts ...otlpmetrichttp.Option) (*metric.Meter, *otlpmetrichttp.Exporter, error) {
+func InitMetric(ctx context.Context, res *resource.Resource, serviceName string, opts ...otlpmetrichttp.Option) (*metric.Meter, *otlpmetrichttp.Exporter, error) {
 	exporter, err := otlpmetrichttp.New(ctx, append(
 		opts,
 		otlpmetrichttp.WithCompression(otlpmetrichttp.GzipCompression),
@@ -73,7 +60,7 @@ func InitMetric(ctx context.Context, res *sdkresource.Resource, serviceName stri
 	return &meter, exporter, nil
 }
 
-func InitTracerProvider(ctx context.Context, res *sdkresource.Resource, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
+func InitTracerProvider(ctx context.Context, res *resource.Resource, opts ...otlptracehttp.Option) (*sdktrace.TracerProvider, error) {
 	exporter, err := otlptracehttp.New(ctx, append(
 		opts,
 		otlptracehttp.WithCompression(otlptracehttp.GzipCompression),
