@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -18,7 +19,26 @@ const (
 
 var meterProvider *metric.MeterProvider
 
-func New(ctx context.Context, serviceName string, version string) (func(context.Context) error, error) {
+type options struct {
+	commit string
+	date   string
+}
+
+type Option func(*options)
+
+func WithCommit(commit string) Option {
+	return func(o *options) {
+		o.commit = commit
+	}
+}
+
+func WithBuildDate(date string) Option {
+	return func(o *options) {
+		o.date = date
+	}
+}
+
+func New(ctx context.Context, serviceName string, version string, opts ...Option) (func(context.Context) error, error) {
 	var shutdownFuncs []func(context.Context) error
 	var err error
 
@@ -39,8 +59,13 @@ func New(ctx context.Context, serviceName string, version string) (func(context.
 		err = errors.Join(inErr, shutdown(ctx))
 	}
 
-	res := newResource(serviceName, version)
-	meterProvider, err = newMeterProvider(ctx, res, serviceName)
+	res, err := newResource(ctx, serviceName, version, opts...)
+	if err != nil {
+		handleErr(err)
+		return nil, err
+	}
+
+	meterProvider, err = newMeterProvider(ctx, res)
 	if err != nil {
 		handleErr(err)
 		return nil, err
@@ -50,28 +75,43 @@ func New(ctx context.Context, serviceName string, version string) (func(context.
 	return shutdown, nil
 }
 
+var noopProvider = metric.NewMeterProvider()
+
 func GetMeterProvider() *metric.MeterProvider {
 	if meterProvider == nil {
-		noopMeterProvider := metric.NewMeterProvider()
-		return noopMeterProvider
+		return noopProvider
 	}
 
 	return meterProvider
 }
 
-func newResource(serviceName string, version string) *resource.Resource {
-	res, _ := resource.New(
-		context.Background(),
+func newResource(ctx context.Context, serviceName string, version string, opts ...Option) (*resource.Resource, error) {
+	o := &options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	attrs := []attribute.KeyValue{
+		semconv.ServiceNameKey.String(serviceName),
+		semconv.ServiceVersionKey.String(version),
+	}
+	if o.commit != "" {
+		attrs = append(attrs, attribute.String("vcs.repository.ref.revision", o.commit))
+	}
+	if o.date != "" {
+		attrs = append(attrs, attribute.String("service.build.date", o.date))
+	}
+
+	return resource.New(
+		ctx,
 		resource.WithTelemetrySDK(),
 		resource.WithOS(),
 		resource.WithProcessRuntimeVersion(),
-		resource.WithAttributes(semconv.ServiceNameKey.String(serviceName), semconv.ServiceVersionKey.String(version)),
+		resource.WithAttributes(attrs...),
 	)
-
-	return res
 }
 
-func newMeterProvider(ctx context.Context, res *resource.Resource, serviceName string, opts ...otlpmetrichttp.Option) (*metric.MeterProvider, error) {
+func newMeterProvider(ctx context.Context, res *resource.Resource, opts ...otlpmetrichttp.Option) (*metric.MeterProvider, error) {
 	metricExporter, err := otlpmetrichttp.New(ctx, append(
 		opts,
 		otlpmetrichttp.WithCompression(otlpmetrichttp.GzipCompression),
@@ -84,6 +124,7 @@ func newMeterProvider(ctx context.Context, res *resource.Resource, serviceName s
 	}
 
 	meterProvider := metric.NewMeterProvider(
+		metric.WithResource(res),
 		metric.WithReader(metric.NewPeriodicReader(metricExporter)),
 	)
 
