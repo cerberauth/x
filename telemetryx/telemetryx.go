@@ -19,6 +19,14 @@ const (
 
 var meterProvider *metric.MeterProvider
 
+var newReader = func(ctx context.Context, opts ...otlpmetrichttp.Option) (metric.Reader, error) {
+	exp, err := newMetricExporter(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return metric.NewPeriodicReader(exp), nil
+}
+
 type options struct {
 	commit string
 	date   string
@@ -54,7 +62,6 @@ func New(ctx context.Context, serviceName string, version string, opts ...Option
 		return err
 	}
 
-	// handleErr calls shutdown for cleanup and makes sure that all errors are returned.
 	handleErr := func(inErr error) {
 		err = errors.Join(inErr, shutdown(ctx))
 	}
@@ -65,11 +72,13 @@ func New(ctx context.Context, serviceName string, version string, opts ...Option
 		return nil, err
 	}
 
-	meterProvider, err = newMeterProvider(ctx, res)
+	reader, err := newReader(ctx, otlpmetrichttp.WithEndpointURL(otelEndpoint))
 	if err != nil {
 		handleErr(err)
 		return nil, err
 	}
+
+	meterProvider = newMeterProvider(res, reader)
 	shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
 
 	return shutdown, nil
@@ -111,22 +120,20 @@ func newResource(ctx context.Context, serviceName string, version string, opts .
 	)
 }
 
-func newMeterProvider(ctx context.Context, res *resource.Resource, opts ...otlpmetrichttp.Option) (*metric.MeterProvider, error) {
-	metricExporter, err := otlpmetrichttp.New(ctx, append(
-		opts,
-		otlpmetrichttp.WithCompression(otlpmetrichttp.GzipCompression),
-		otlpmetrichttp.WithTimeout(timeout),
-		otlpmetrichttp.WithRetry(otlpmetrichttp.RetryConfig{Enabled: false}),
-		otlpmetrichttp.WithEndpointURL(otelEndpoint),
+func newMetricExporter(ctx context.Context, opts ...otlpmetrichttp.Option) (metric.Exporter, error) {
+	return otlpmetrichttp.New(ctx, append(
+		[]otlpmetrichttp.Option{
+			otlpmetrichttp.WithCompression(otlpmetrichttp.GzipCompression),
+			otlpmetrichttp.WithTimeout(timeout),
+			otlpmetrichttp.WithRetry(otlpmetrichttp.RetryConfig{Enabled: false}),
+		},
+		opts...,
 	)...)
-	if err != nil {
-		return nil, err
-	}
+}
 
-	meterProvider := metric.NewMeterProvider(
+func newMeterProvider(res *resource.Resource, reader metric.Reader) *metric.MeterProvider {
+	return metric.NewMeterProvider(
 		metric.WithResource(res),
-		metric.WithReader(metric.NewPeriodicReader(metricExporter)),
+		metric.WithReader(reader),
 	)
-
-	return meterProvider, nil
 }
