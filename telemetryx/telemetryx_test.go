@@ -2,9 +2,6 @@ package telemetryx
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -17,6 +14,15 @@ func resetMeterProvider(t *testing.T) {
 	t.Helper()
 	original := meterProvider
 	t.Cleanup(func() { meterProvider = original })
+}
+
+func useNoopReader(t *testing.T) {
+	t.Helper()
+	original := newReader
+	newReader = func(_ context.Context, _ ...otlpmetrichttp.Option) (metric.Reader, error) {
+		return metric.NewManualReader(), nil
+	}
+	t.Cleanup(func() { newReader = original })
 }
 
 func TestGetMeterProvider_ReturnsNoopWhenNil(t *testing.T) {
@@ -77,31 +83,14 @@ func TestNewResource_EmptyValues(t *testing.T) {
 	}
 }
 
-func newMockOTLPServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.ReadAll(r.Body) //nolint:errcheck
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 func TestNewMeterProvider_Success(t *testing.T) {
-	srv := newMockOTLPServer(t)
 	ctx := context.Background()
 	res, err := newResource(ctx, "test-service", "0.1.0")
 	if err != nil {
 		t.Fatalf("unexpected resource error: %v", err)
 	}
 
-	mp, err := newMeterProvider(ctx, res,
-		otlpmetrichttp.WithEndpointURL(srv.URL),
-		otlpmetrichttp.WithInsecure(),
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	mp := newMeterProvider(res, metric.NewManualReader())
 	if mp == nil {
 		t.Fatal("expected non-nil meter provider")
 	}
@@ -111,20 +100,13 @@ func TestNewMeterProvider_Success(t *testing.T) {
 }
 
 func TestNewMeterProvider_ShutdownReleasesResources(t *testing.T) {
-	srv := newMockOTLPServer(t)
 	ctx := context.Background()
 	res, err := newResource(ctx, "test-service", "0.1.0")
 	if err != nil {
 		t.Fatalf("unexpected resource error: %v", err)
 	}
 
-	mp, err := newMeterProvider(ctx, res,
-		otlpmetrichttp.WithEndpointURL(srv.URL),
-		otlpmetrichttp.WithInsecure(),
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	mp := newMeterProvider(res, metric.NewManualReader())
 
 	if err := mp.Shutdown(ctx); err != nil {
 		t.Errorf("first shutdown error: %v", err)
@@ -136,10 +118,7 @@ func TestNewMeterProvider_ShutdownReleasesResources(t *testing.T) {
 
 func TestNew_ReturnsShutdownFunc(t *testing.T) {
 	resetMeterProvider(t)
-	srv := newMockOTLPServer(t)
-
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", srv.URL)
-	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "true")
+	useNoopReader(t)
 
 	ctx := context.Background()
 	shutdown, err := New(ctx, "test-service", "1.0.0")
@@ -156,10 +135,7 @@ func TestNew_ReturnsShutdownFunc(t *testing.T) {
 
 func TestNew_SetsGlobalMeterProvider(t *testing.T) {
 	resetMeterProvider(t)
-	srv := newMockOTLPServer(t)
-
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", srv.URL)
-	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "true")
+	useNoopReader(t)
 
 	ctx := context.Background()
 	meterProvider = nil
