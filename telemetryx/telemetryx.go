@@ -2,14 +2,15 @@ package telemetryx
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
-	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	"go.opentelemetry.io/otel"
+	otellog "go.opentelemetry.io/otel/log"
+	globallog "go.opentelemetry.io/otel/log/global"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/cerberauth/x/otelx"
 )
 
 const (
@@ -17,123 +18,93 @@ const (
 	timeout      = 1 * time.Second
 )
 
-var meterProvider *metric.MeterProvider
+var meterProvider *sdkmetric.MeterProvider
 
-var newReader = func(ctx context.Context, opts ...otlpmetrichttp.Option) (metric.Reader, error) {
-	exp, err := newMetricExporter(ctx, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return metric.NewPeriodicReader(exp), nil
-}
+// otelxNew is a seam for test injection.
+var otelxNew = otelx.New
 
 type options struct {
 	commit string
 	date   string
 }
 
+// Option configures telemetryx.New.
 type Option func(*options)
 
 func WithCommit(commit string) Option {
-	return func(o *options) {
-		o.commit = commit
-	}
+	return func(o *options) { o.commit = commit }
 }
 
 func WithBuildDate(date string) Option {
-	return func(o *options) {
-		o.date = date
-	}
+	return func(o *options) { o.date = date }
 }
 
+// New initialises OpenTelemetry for metrics, traces, and logs, exporting to
+// the cerberauth telemetry endpoint. All exporter options are hardcoded so
+// OTEL_* environment variables cannot override the endpoint, timeout,
+// compression, headers, or resource attributes.
+//
+// The returned shutdown function must be deferred at the program entry point.
+// It automatically captures any unhandled panic, records it via OTEL, flushes
+// all telemetry, and then re-panics so the runtime still sees the original
+// crash.
 func New(ctx context.Context, serviceName string, version string, opts ...Option) (func(context.Context) error, error) {
-	var shutdownFuncs []func(context.Context) error
-	var err error
-
-	// shutdown calls cleanup functions registered via shutdownFuncs.
-	// The errors from the calls are joined.
-	// Each registered cleanup will be invoked once.
-	shutdown := func(ctx context.Context) error {
-		var err error
-		for _, fn := range shutdownFuncs {
-			err = errors.Join(err, fn(ctx))
-		}
-		shutdownFuncs = nil
-		return err
-	}
-
-	handleErr := func(inErr error) {
-		err = errors.Join(inErr, shutdown(ctx))
-	}
-
-	res, err := newResource(ctx, serviceName, version, opts...)
-	if err != nil {
-		handleErr(err)
-		return nil, err
-	}
-
-	reader, err := newReader(ctx, otlpmetrichttp.WithEndpointURL(otelEndpoint))
-	if err != nil {
-		handleErr(err)
-		return nil, err
-	}
-
-	meterProvider = newMeterProvider(res, reader)
-	shutdownFuncs = append(shutdownFuncs, meterProvider.Shutdown)
-
-	return shutdown, nil
-}
-
-var noopProvider = metric.NewMeterProvider()
-
-func GetMeterProvider() *metric.MeterProvider {
-	if meterProvider == nil {
-		return noopProvider
-	}
-
-	return meterProvider
-}
-
-func newResource(ctx context.Context, serviceName string, version string, opts ...Option) (*resource.Resource, error) {
 	o := &options{}
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	attrs := []attribute.KeyValue{
-		semconv.ServiceNameKey.String(serviceName),
-		semconv.ServiceVersionKey.String(version),
+	xOpts := []otelx.Option{
+		otelx.WithEndpoint(otelEndpoint),
+		otelx.WithTimeout(timeout),
+		// Explicit empty headers block OTEL_EXPORTER_OTLP_HEADERS injection.
+		otelx.WithHeaders(map[string]string{}),
 	}
 	if o.commit != "" {
-		attrs = append(attrs, attribute.String("vcs.repository.ref.revision", o.commit))
+		xOpts = append(xOpts, otelx.WithCommit(o.commit))
 	}
 	if o.date != "" {
-		attrs = append(attrs, attribute.String("service.build.date", o.date))
+		xOpts = append(xOpts, otelx.WithBuildDate(o.date))
 	}
 
-	return resource.New(
-		ctx,
-		resource.WithTelemetrySDK(),
-		resource.WithOS(),
-		resource.WithProcessRuntimeVersion(),
-		resource.WithAttributes(attrs...),
-	)
+	internalShutdown, err := otelxNew(ctx, serviceName, version, xOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	if mp, ok := otel.GetMeterProvider().(*sdkmetric.MeterProvider); ok {
+		meterProvider = mp
+	}
+
+	return func(ctx context.Context) error {
+		if r := recover(); r != nil {
+			otelx.ReportPanic(ctx, r)
+			flushCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = internalShutdown(flushCtx)
+			panic(r)
+		}
+		return internalShutdown(ctx)
+	}, nil
 }
 
-func newMetricExporter(ctx context.Context, opts ...otlpmetrichttp.Option) (metric.Exporter, error) {
-	return otlpmetrichttp.New(ctx, append(
-		[]otlpmetrichttp.Option{
-			otlpmetrichttp.WithCompression(otlpmetrichttp.GzipCompression),
-			otlpmetrichttp.WithTimeout(timeout),
-			otlpmetrichttp.WithRetry(otlpmetrichttp.RetryConfig{Enabled: false}),
-		},
-		opts...,
-	)...)
+var noopProvider = sdkmetric.NewMeterProvider()
+
+// GetMeterProvider returns the SDK MeterProvider set by New, or a noop
+// provider if New has not been called.
+func GetMeterProvider() *sdkmetric.MeterProvider {
+	if meterProvider == nil {
+		return noopProvider
+	}
+	return meterProvider
 }
 
-func newMeterProvider(res *resource.Resource, reader metric.Reader) *metric.MeterProvider {
-	return metric.NewMeterProvider(
-		metric.WithResource(res),
-		metric.WithReader(reader),
-	)
+// GetTracerProvider returns the global TracerProvider set by New.
+func GetTracerProvider() trace.TracerProvider {
+	return otel.GetTracerProvider()
+}
+
+// GetLoggerProvider returns the global LoggerProvider set by New.
+func GetLoggerProvider() otellog.LoggerProvider {
+	return globallog.GetLoggerProvider()
 }
