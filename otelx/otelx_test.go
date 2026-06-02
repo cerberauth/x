@@ -3,6 +3,7 @@ package otelx
 import (
 	"context"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -142,7 +143,7 @@ func TestNewResource_ContainsServiceAttributes(t *testing.T) {
 	}
 }
 
-func TestNewResource_SkipsFromEnv(t *testing.T) {
+func TestNewResource_RespectsFromEnv(t *testing.T) {
 	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "injected.key=injected.value")
 
 	res, err := newResource(context.Background(), "svc", "1.0", &options{})
@@ -151,10 +152,23 @@ func TestNewResource_SkipsFromEnv(t *testing.T) {
 	}
 
 	for _, a := range res.Attributes() {
-		if string(a.Key) == "injected.key" {
-			t.Error("OTEL_RESOURCE_ATTRIBUTES must not inject attributes (WithFromEnv not called)")
+		if string(a.Key) == "injected.key" && a.Value.AsString() == "injected.value" {
+			return
 		}
 	}
+	t.Error("OTEL_RESOURCE_ATTRIBUTES should inject attributes via WithFromEnv")
+}
+
+func TestNew_WithTimeout_AppliesExplicitTimeout(t *testing.T) {
+	useNoopExporters(t)
+	resetGlobals(t)
+
+	ctx := context.Background()
+	shutdown, err := New(ctx, "test-service", "1.0.0", WithTimeout(10*time.Second))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer shutdown(ctx) //nolint:errcheck
 }
 
 func TestNewResource_WithCommitAndDate(t *testing.T) {
