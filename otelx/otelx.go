@@ -18,8 +18,6 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
-const defaultTimeout = 5 * time.Second
-
 type options struct {
 	endpoint string
 	timeout  time.Duration
@@ -77,7 +75,7 @@ var (
 // When WithEndpoint is not supplied, OTEL_EXPORTER_OTLP_ENDPOINT (and its
 // signal-specific variants) apply as per the standard SDK precedence rules.
 func New(ctx context.Context, serviceName, version string, opts ...Option) (func(context.Context) error, error) {
-	o := &options{timeout: defaultTimeout}
+	o := &options{}
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -149,6 +147,7 @@ func newResource(ctx context.Context, serviceName, version string, o *options) (
 		resource.WithTelemetrySDK(),
 		resource.WithOS(),
 		resource.WithProcessRuntimeVersion(),
+		resource.WithFromEnv(),
 		resource.WithAttributes(attrs...),
 	)
 }
@@ -156,8 +155,10 @@ func newResource(ctx context.Context, serviceName, version string, o *options) (
 func newMeterProvider(ctx context.Context, res *resource.Resource, o *options) (*sdkmetric.MeterProvider, error) {
 	exportOpts := []otlpmetrichttp.Option{
 		otlpmetrichttp.WithCompression(otlpmetrichttp.GzipCompression),
-		otlpmetrichttp.WithTimeout(o.timeout),
 		otlpmetrichttp.WithRetry(otlpmetrichttp.RetryConfig{Enabled: false}),
+	}
+	if o.timeout != 0 {
+		exportOpts = append(exportOpts, otlpmetrichttp.WithTimeout(o.timeout))
 	}
 	if o.endpoint != "" {
 		exportOpts = append(exportOpts, otlpmetrichttp.WithEndpointURL(o.endpoint))
@@ -178,8 +179,10 @@ func newMeterProvider(ctx context.Context, res *resource.Resource, o *options) (
 func newTracerProvider(ctx context.Context, res *resource.Resource, o *options) (*sdktrace.TracerProvider, error) {
 	exportOpts := []otlptracehttp.Option{
 		otlptracehttp.WithCompression(otlptracehttp.GzipCompression),
-		otlptracehttp.WithTimeout(o.timeout),
 		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{Enabled: false}),
+	}
+	if o.timeout != 0 {
+		exportOpts = append(exportOpts, otlptracehttp.WithTimeout(o.timeout))
 	}
 	if o.endpoint != "" {
 		exportOpts = append(exportOpts, otlptracehttp.WithEndpointURL(o.endpoint))
@@ -200,8 +203,10 @@ func newTracerProvider(ctx context.Context, res *resource.Resource, o *options) 
 func newLoggerProvider(ctx context.Context, res *resource.Resource, o *options) (*sdklog.LoggerProvider, error) {
 	exportOpts := []otlploghttp.Option{
 		otlploghttp.WithCompression(otlploghttp.GzipCompression),
-		otlploghttp.WithTimeout(o.timeout),
 		otlploghttp.WithRetry(otlploghttp.RetryConfig{Enabled: false}),
+	}
+	if o.timeout != 0 {
+		exportOpts = append(exportOpts, otlploghttp.WithTimeout(o.timeout))
 	}
 	if o.endpoint != "" {
 		exportOpts = append(exportOpts, otlploghttp.WithEndpointURL(o.endpoint))
