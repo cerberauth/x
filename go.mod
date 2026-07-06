@@ -3,8 +3,8 @@ module github.com/cerberauth/x
 go 1.26.0
 
 require (
-	github.com/cerberauth/harnessx v0.1.1
-	github.com/cerberauth/reportx v0.1.0
+	github.com/cerberauth/harnessx v0.1.2
+	github.com/cerberauth/reportx v0.1.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.44.0

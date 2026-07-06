@@ -21,7 +21,7 @@ func (e *recordingLogExporter) Export(_ context.Context, records []sdklog.Record
 	e.records = append(e.records, records...)
 	return nil
 }
-func (e *recordingLogExporter) Shutdown(_ context.Context) error  { return nil }
+func (e *recordingLogExporter) Shutdown(_ context.Context) error   { return nil }
 func (e *recordingLogExporter) ForceFlush(_ context.Context) error { return nil }
 
 // setupTraceAndLog returns ctx (with an active span), a span ender, the
