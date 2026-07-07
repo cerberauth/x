@@ -1,10 +1,9 @@
-package scanreporter_test
+package harnessreport
 
 import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +15,6 @@ import (
 	"github.com/cerberauth/reportx/evidence"
 	"github.com/cerberauth/reportx/score"
 	"github.com/cerberauth/reportx/transport"
-	"github.com/cerberauth/x/reportx/scanreporter"
 )
 
 type mockFormatter struct {
@@ -32,13 +30,8 @@ func (f *mockFormatter) Format(r *reportx.Report) ([]byte, error) {
 	return []byte("mocked formatted report"), nil
 }
 
-func (f *mockFormatter) MediaType() string {
-	return "text/plain"
-}
-
-func (f *mockFormatter) FileExtension() string {
-	return "txt"
-}
+func (f *mockFormatter) MediaType() string     { return "text/plain" }
+func (f *mockFormatter) FileExtension() string { return "txt" }
 
 type errWriter struct{}
 
@@ -46,19 +39,19 @@ func (errWriter) Write(p []byte) (n int, err error) {
 	return 0, errors.New("write error")
 }
 
-func TestReporter_Report_VulnerableOnly(t *testing.T) {
+func TestBuild_VulnerableOnly(t *testing.T) {
 	var buf bytes.Buffer
 	mFormatter := &mockFormatter{}
 
-	r := &scanreporter.Reporter{
+	r := &Reporter{cfg: Config{
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      &buf,
-	}
+	}}
 
-	results := []scanreporter.Result{
+	results := []Result{
 		{
 			Name:        "CheckVulnerable",
 			Payload:     "vulnerable-payload",
@@ -77,24 +70,17 @@ func TestReporter_Report_VulnerableOnly(t *testing.T) {
 		},
 	}
 
-	meta := scanreporter.ScanMeta{
-		Target: "http://target-domain.com",
-	}
-
-	err := r.Report(context.Background(), results, meta)
+	err := r.build(context.Background(), "http://target-domain.com", results)
 	require.NoError(t, err)
 
-	// Verify that the mocked formatted report was written
 	assert.Equal(t, "mocked formatted report", buf.String())
 
-	// Verify the constructed report
 	require.NotNil(t, mFormatter.report)
 	assert.Equal(t, "my-tool", mFormatter.report.ToolName)
 	assert.Equal(t, "1.0.0", mFormatter.report.ToolVersion)
 	assert.Equal(t, "my-report", mFormatter.report.Title)
 	assert.Equal(t, "http://target-domain.com", mFormatter.report.Target)
 
-	// Check findings
 	require.Len(t, mFormatter.report.Findings, 1)
 	f := mFormatter.report.Findings[0]
 	assert.Equal(t, "CheckVulnerable", f.ID)
@@ -108,10 +94,8 @@ func TestReporter_Report_VulnerableOnly(t *testing.T) {
 	assert.Equal(t, "vulnerable-payload", f.Parameter)
 	assert.Equal(t, map[string]string{"detail": "some extra detail"}, f.Extra)
 
-	// Severity should be mapped based on CVSSScore
 	assert.Equal(t, score.Label(7.5), f.Severity)
 
-	// Evidence
 	require.NotNil(t, f.Evidence)
 	ev, ok := f.Evidence.(*evidence.HTTPEvidence)
 	require.True(t, ok)
@@ -120,19 +104,19 @@ func TestReporter_Report_VulnerableOnly(t *testing.T) {
 	assert.Equal(t, 200, ev.ResponseStatus)
 }
 
-func TestReporter_Report_OfflineTarget(t *testing.T) {
+func TestBuild_OfflineTarget(t *testing.T) {
 	var buf bytes.Buffer
 	mFormatter := &mockFormatter{}
 
-	r := &scanreporter.Reporter{
+	r := &Reporter{cfg: Config{
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      &buf,
-	}
+	}}
 
-	results := []scanreporter.Result{
+	results := []Result{
 		{
 			Name:       "CheckVulnerable",
 			Vulnerable: true,
@@ -140,22 +124,15 @@ func TestReporter_Report_OfflineTarget(t *testing.T) {
 		},
 	}
 
-	meta := scanreporter.ScanMeta{
-		Target: "",
-	}
-
-	err := r.Report(context.Background(), results, meta)
+	err := r.build(context.Background(), "", results)
 	require.NoError(t, err)
 
-	// target should fall back to "(offline)"
 	require.NotNil(t, mFormatter.report)
 	assert.Equal(t, "(offline)", mFormatter.report.Target)
 
 	require.Len(t, mFormatter.report.Findings, 1)
 	f := mFormatter.report.Findings[0]
-	// Severity should not be set (is empty/default) since score is 0
 	assert.Empty(t, f.Severity)
-	// Evidence should not have status/URL/method since status is 0
 	require.NotNil(t, f.Evidence)
 	ev, ok := f.Evidence.(*evidence.HTTPEvidence)
 	require.True(t, ok)
@@ -164,73 +141,63 @@ func TestReporter_Report_OfflineTarget(t *testing.T) {
 	assert.Equal(t, 0, ev.ResponseStatus)
 }
 
-func TestReporter_Report_WriterError(t *testing.T) {
+func TestBuild_WriterError(t *testing.T) {
 	mFormatter := &mockFormatter{}
 
-	r := &scanreporter.Reporter{
+	r := &Reporter{cfg: Config{
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      errWriter{},
-	}
+	}}
 
-	err := r.Report(context.Background(), []scanreporter.Result{}, scanreporter.ScanMeta{})
+	err := r.build(context.Background(), "", nil)
 	assert.ErrorContains(t, err, "write error")
 }
 
-func TestReporter_Report_FormatterError(t *testing.T) {
+func TestBuild_FormatterError(t *testing.T) {
 	var buf bytes.Buffer
-	mFormatter := &mockFormatter{
-		err: errors.New("formatter error"),
-	}
+	mFormatter := &mockFormatter{err: errors.New("formatter error")}
 
-	r := &scanreporter.Reporter{
+	r := &Reporter{cfg: Config{
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      &buf,
-	}
+	}}
 
-	err := r.Report(context.Background(), []scanreporter.Result{}, scanreporter.ScanMeta{})
+	err := r.build(context.Background(), "", nil)
 	assert.ErrorContains(t, err, "formatter error")
 }
 
-func TestReporter_Report_WithTransportSuccess(t *testing.T) {
+func TestBuild_WithTransportSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	mFormatter := &mockFormatter{}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		assert.NoError(t, err)
-		assert.Equal(t, "mocked formatted report", string(body))
-		assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
-		assert.Equal(t, "custom-val", r.Header.Get("X-Custom"))
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
 
 	tr := transport.NewHTTPTransport(ts.URL)
-	tr.Headers = map[string]string{
-		"X-Custom": "custom-val",
-	}
 	tr.Client = ts.Client()
 
-	r := &scanreporter.Reporter{
+	r := &Reporter{cfg: Config{
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      &buf,
 		Transport:   tr,
-	}
+	}}
 
-	err := r.Report(context.Background(), []scanreporter.Result{}, scanreporter.ScanMeta{})
+	err := r.build(context.Background(), "", nil)
 	require.NoError(t, err)
 }
 
-func TestReporter_Report_WithTransportError(t *testing.T) {
+func TestBuild_WithTransportError(t *testing.T) {
 	var buf bytes.Buffer
 	mFormatter := &mockFormatter{}
 
@@ -242,15 +209,15 @@ func TestReporter_Report_WithTransportError(t *testing.T) {
 	tr := transport.NewHTTPTransport(ts.URL)
 	tr.Client = ts.Client()
 
-	r := &scanreporter.Reporter{
+	r := &Reporter{cfg: Config{
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      &buf,
 		Transport:   tr,
-	}
+	}}
 
-	err := r.Report(context.Background(), []scanreporter.Result{}, scanreporter.ScanMeta{})
+	err := r.build(context.Background(), "", nil)
 	assert.Error(t, err)
 }

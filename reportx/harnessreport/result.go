@@ -1,4 +1,4 @@
-package scanreporter
+package harnessreport
 
 // Result is a single check's outcome from a harnessx-based vulnerability scan.
 type Result struct {
