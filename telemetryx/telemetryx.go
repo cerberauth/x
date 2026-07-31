@@ -16,6 +16,10 @@ import (
 const (
 	otelEndpoint = "https://telemetry.cerberauth.com"
 	timeout      = 1 * time.Second
+
+	// otlploghttp does not default to /v1/logs when the endpoint URL has no
+	// path (unlike the metrics/traces exporters), so it must be set explicitly.
+	otelLogsURLPath = "/v1/logs"
 )
 
 var meterProvider *sdkmetric.MeterProvider
@@ -57,6 +61,7 @@ func New(ctx context.Context, serviceName string, version string, opts ...Option
 	xOpts := []otelx.Option{
 		otelx.WithEndpoint(otelEndpoint),
 		otelx.WithTimeout(timeout),
+		otelx.WithLogsURLPath(otelLogsURLPath),
 		// Explicit empty headers block OTEL_EXPORTER_OTLP_HEADERS injection.
 		otelx.WithHeaders(map[string]string{}),
 	}

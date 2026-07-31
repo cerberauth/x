@@ -24,6 +24,7 @@ type options struct {
 	headers  map[string]string
 	commit   string
 	date     string
+	logsPath string
 }
 
 // Option configures otelx.New.
@@ -49,6 +50,16 @@ func WithCommit(commit string) Option {
 
 func WithBuildDate(date string) Option {
 	return func(o *options) { o.date = date }
+}
+
+// WithLogsURLPath overrides the URL path used for the logs exporter.
+//
+// Unlike otlpmetrichttp/otlptracehttp, otlploghttp's WithEndpointURL does not
+// fall back to a default path (/v1/logs) when the endpoint URL has none —
+// it sends requests to the bare endpoint instead. Callers that pass a
+// path-less WithEndpoint should set this explicitly.
+func WithLogsURLPath(path string) Option {
+	return func(o *options) { o.logsPath = path }
 }
 
 // Seams for test injection — override in _test.go files.
@@ -210,6 +221,9 @@ func newLoggerProvider(ctx context.Context, res *resource.Resource, o *options) 
 	}
 	if o.endpoint != "" {
 		exportOpts = append(exportOpts, otlploghttp.WithEndpointURL(o.endpoint))
+	}
+	if o.logsPath != "" {
+		exportOpts = append(exportOpts, otlploghttp.WithURLPath(o.logsPath))
 	}
 	if o.headers != nil {
 		exportOpts = append(exportOpts, otlploghttp.WithHeaders(o.headers))
