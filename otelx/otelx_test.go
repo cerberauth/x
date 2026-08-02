@@ -190,3 +190,26 @@ func TestNewResource_WithCommitAndDate(t *testing.T) {
 		t.Errorf("date attr: got %q, want %q", v, "2025-01-01")
 	}
 }
+
+func TestNewResource_WithAttributes(t *testing.T) {
+	o := &options{attrs: []attribute.KeyValue{
+		attribute.String("custom.key", "custom.value"),
+		attribute.Int("custom.count", 3),
+	}}
+	res, err := newResource(context.Background(), "svc", "1.0", o)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	attrMap := make(map[attribute.Key]attribute.Value)
+	for _, a := range res.Attributes() {
+		attrMap[a.Key] = a.Value
+	}
+
+	if v, ok := attrMap["custom.key"]; !ok || v.AsString() != "custom.value" {
+		t.Errorf("custom.key: got %q, want %q", v.AsString(), "custom.value")
+	}
+	if v, ok := attrMap["custom.count"]; !ok || v.AsInt64() != 3 {
+		t.Errorf("custom.count: got %v, want 3", v.AsInt64())
+	}
+}
