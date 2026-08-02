@@ -39,6 +39,25 @@ func useNoopOtelx(t *testing.T) {
 	})
 }
 
+// captureOtelxOpts installs a test seam that records the otelx.Options New
+// was called with, without performing any real exporter setup.
+func captureOtelxOpts(t *testing.T) *[]otelx.Option {
+	t.Helper()
+	orig := otelxNew
+	var captured []otelx.Option
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
+	otelxNew = func(ctx context.Context, serviceName, version string, opts ...otelx.Option) (func(context.Context) error, error) {
+		captured = opts
+		otel.SetMeterProvider(mp)
+		return func(context.Context) error { return nil }, nil
+	}
+	t.Cleanup(func() {
+		_ = mp.Shutdown(context.Background())
+		otelxNew = orig
+	})
+	return &captured
+}
+
 func TestGetMeterProvider_ReturnsNoopWhenNil(t *testing.T) {
 	resetProviders(t)
 	meterProvider = nil
@@ -137,5 +156,35 @@ func TestNew_ShutdownNoPanicRunsNormally(t *testing.T) {
 	// Normal execution — no panic, shutdown should return nil error.
 	if err := shutdown(ctx); err != nil {
 		t.Errorf("shutdown error on normal path: %v", err)
+	}
+}
+
+func TestNew_ForwardsCIAttributesToOtelx(t *testing.T) {
+	resetProviders(t)
+	clearCIEnv(t)
+	captured := captureOtelxOpts(t)
+
+	ctx := context.Background()
+	shutdown, err := New(ctx, "test-service", "1.0.0")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer shutdown(ctx) //nolint:errcheck
+
+	baseline := len(*captured)
+
+	resetProviders(t)
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("GITHUB_WORKFLOW", "CI")
+	captured2 := captureOtelxOpts(t)
+
+	shutdown2, err := New(ctx, "test-service", "1.0.0")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer shutdown2(ctx) //nolint:errcheck
+
+	if len(*captured2) <= baseline {
+		t.Errorf("expected an extra otelx.Option to be forwarded when CI is detected: baseline=%d, got=%d", baseline, len(*captured2))
 	}
 }

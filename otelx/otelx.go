@@ -25,6 +25,7 @@ type options struct {
 	commit   string
 	date     string
 	logsPath string
+	attrs    []attribute.KeyValue
 }
 
 // Option configures otelx.New.
@@ -50,6 +51,12 @@ func WithCommit(commit string) Option {
 
 func WithBuildDate(date string) Option {
 	return func(o *options) { o.date = date }
+}
+
+// WithAttributes adds extra attributes to the resource, in addition to
+// service name/version and any set via WithCommit/WithBuildDate.
+func WithAttributes(attrs ...attribute.KeyValue) Option {
+	return func(o *options) { o.attrs = append(o.attrs, attrs...) }
 }
 
 // WithLogsURLPath overrides the URL path used for the logs exporter.
@@ -154,6 +161,7 @@ func newResource(ctx context.Context, serviceName, version string, o *options) (
 	if o.date != "" {
 		attrs = append(attrs, attribute.String("service.build.date", o.date))
 	}
+	attrs = append(attrs, o.attrs...)
 	return resource.New(ctx,
 		resource.WithTelemetrySDK(),
 		resource.WithOS(),

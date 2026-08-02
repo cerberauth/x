@@ -71,6 +71,9 @@ func New(ctx context.Context, serviceName string, version string, opts ...Option
 	if o.date != "" {
 		xOpts = append(xOpts, otelx.WithBuildDate(o.date))
 	}
+	if info, ok := detectCI(); ok {
+		xOpts = append(xOpts, otelx.WithAttributes(info.attributes()...))
+	}
 
 	internalShutdown, err := otelxNew(ctx, serviceName, version, xOpts...)
 	if err != nil {
