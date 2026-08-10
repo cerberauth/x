@@ -5,17 +5,18 @@ package harnessreport
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 
 	"github.com/cerberauth/harnessx"
+	"github.com/cerberauth/harnessx/checkdef"
 	"github.com/cerberauth/reportx"
 	"github.com/cerberauth/reportx/enrich"
 	"github.com/cerberauth/reportx/evidence"
 	"github.com/cerberauth/reportx/format"
 	"github.com/cerberauth/reportx/score"
 	"github.com/cerberauth/reportx/transport"
-	xharnessx "github.com/cerberauth/x/harnessx"
 )
 
 // Config configures a Reporter.
@@ -29,7 +30,7 @@ type Config struct {
 
 	// CheckDefs supplies per-check metadata (name, CVSS, CWE, OWASP, link,
 	// description) that harnessx.Check itself doesn't carry.
-	CheckDefs map[harnessx.CheckID]xharnessx.CheckDef
+	CheckDefs map[harnessx.CheckID]checkdef.CheckDef
 
 	// BaselineCheckID, if set, marks a check whose Result carries an int
 	// baseline status code rather than a finding; it's excluded from
@@ -43,10 +44,11 @@ type Reporter struct {
 	ctx context.Context
 	cfg Config
 
-	mu      sync.Mutex
-	target  string
-	results []Result
-	err     error
+	mu          sync.Mutex
+	target      string
+	results     []Result
+	obsFindings []reportx.Finding
+	err         error
 }
 
 // New returns a Reporter ready to be registered via harnessx.WithReporters.
@@ -67,15 +69,26 @@ func (r *Reporter) OnCheckComplete(result harnessx.Result) {
 		return
 	}
 
+	def := r.cfg.CheckDefs[result.CheckID]
+
+	var obsFindings []reportx.Finding
+	for _, obs := range result.Observations {
+		obsFindings = append(obsFindings, findingFromObservation(obs, def))
+	}
+
 	pr, ok := harnessx.DataAs[Result](result)
 	if !ok {
 		if !result.Skipped {
+			if len(obsFindings) > 0 {
+				r.mu.Lock()
+				r.obsFindings = append(r.obsFindings, obsFindings...)
+				r.mu.Unlock()
+			}
 			return
 		}
 		pr = Result{Skipped: true, SkipReason: result.SkipReason}
 	}
 
-	def := r.cfg.CheckDefs[result.CheckID]
 	if pr.Name == "" {
 		pr.Name = def.Name
 	}
@@ -83,21 +96,61 @@ func (r *Reporter) OnCheckComplete(result harnessx.Result) {
 	pr.CVSSScore = def.CVSSScore
 	pr.CWEID = def.CWEID
 	pr.OWASP = def.OWASP
+	pr.CAPECID = def.CAPECID
+	pr.Tags = def.Tags
+	pr.DefExtra = def.Extra
 	pr.Link = def.Link
 	pr.Description = def.Description
 
 	r.mu.Lock()
 	r.results = append(r.results, pr)
+	r.obsFindings = append(r.obsFindings, obsFindings...)
 	r.mu.Unlock()
+}
+
+// findingFromObservation converts a harnessx.Observation — a check-emitted,
+// finding-worthy record independent of the Data/DataAs[Result] convention —
+// into a reportx.Finding, falling back to the check's CheckDef for the
+// scoring/classification metadata Observation doesn't carry itself.
+func findingFromObservation(obs harnessx.Observation, def checkdef.CheckDef) reportx.Finding {
+	f := reportx.Finding{
+		ID:           obs.Title,
+		Title:        obs.Title,
+		Description:  obs.Description,
+		URL:          def.Link,
+		CWEID:        def.CWEID,
+		OwaspTop10:   def.OWASP,
+		CVSS40Score:  def.CVSSScore,
+		CVSS40Vector: def.CVSSVector,
+		Tags:         def.Tags,
+		Status:       reportx.StatusActive,
+	}
+	if def.CVSSScore > 0 {
+		f.Severity = score.Label(def.CVSSScore)
+	}
+	if obs.Evidence != "" {
+		f.Evidence = &evidence.CustomEvidence{Data: map[string]any{"evidence": obs.Evidence}}
+	}
+	if def.CAPECID != "" || len(obs.Metadata) > 0 {
+		f.Extra = map[string]string{}
+		if def.CAPECID != "" {
+			f.Extra["capec_id"] = def.CAPECID
+		}
+		for k, v := range obs.Metadata {
+			f.Extra[k] = v
+		}
+	}
+	return f
 }
 
 func (r *Reporter) OnScanComplete(_ harnessx.ScanSummary) {
 	r.mu.Lock()
 	target := r.target
 	results := r.results
+	obsFindings := r.obsFindings
 	r.mu.Unlock()
 
-	err := r.build(r.ctx, target, results)
+	err := r.build(r.ctx, target, results, obsFindings)
 
 	r.mu.Lock()
 	r.err = err
@@ -113,42 +166,57 @@ func (r *Reporter) Err() error {
 	return r.err
 }
 
+// findingFromResult converts a vulnerable Result into a reportx.Finding.
+func findingFromResult(pr Result, target string) reportx.Finding {
+	f := reportx.Finding{
+		ID:           pr.Name,
+		Title:        pr.Name,
+		Description:  pr.Description,
+		URL:          pr.Link,
+		CWEID:        pr.CWEID,
+		OwaspTop10:   pr.OWASP,
+		CVSS40Score:  pr.CVSSScore,
+		CVSS40Vector: pr.CVSSVector,
+		Tags:         pr.Tags,
+		Status:       reportx.StatusActive,
+		Parameter:    pr.Payload,
+	}
+	if pr.CVSSScore > 0 {
+		f.Severity = score.Label(pr.CVSSScore)
+	}
+
+	ev := &evidence.HTTPEvidence{}
+	if pr.Status != 0 {
+		ev.RequestMethod = "GET"
+		ev.RequestURL = target
+		ev.ResponseStatus = pr.Status
+	}
+	f.Evidence = ev
+
+	if pr.Extra != "" || pr.CAPECID != "" || len(pr.DefExtra) > 0 {
+		f.Extra = map[string]string{}
+		if pr.Extra != "" {
+			f.Extra["detail"] = pr.Extra
+		}
+		if pr.CAPECID != "" {
+			f.Extra["capec_id"] = pr.CAPECID
+		}
+		for k, v := range pr.DefExtra {
+			f.Extra[k] = fmt.Sprint(v)
+		}
+	}
+	return f
+}
+
 // build constructs a reportx.Report from accumulated results and
 // writes/sends it.
-func (r *Reporter) build(ctx context.Context, target string, results []Result) error {
-	var findings []reportx.Finding
+func (r *Reporter) build(ctx context.Context, target string, results []Result, obsFindings []reportx.Finding) error {
+	findings := append([]reportx.Finding{}, obsFindings...)
 	for _, pr := range results {
 		if !pr.Vulnerable {
 			continue
 		}
-		f := reportx.Finding{
-			ID:           pr.Name,
-			Title:        pr.Name,
-			Description:  pr.Description,
-			URL:          pr.Link,
-			CWEID:        pr.CWEID,
-			CVSS40Score:  pr.CVSSScore,
-			CVSS40Vector: pr.CVSSVector,
-			Status:       reportx.StatusActive,
-		}
-		if pr.CVSSScore > 0 {
-			f.Severity = score.Label(pr.CVSSScore)
-		}
-
-		f.Parameter = pr.Payload
-
-		ev := &evidence.HTTPEvidence{}
-		if pr.Status != 0 {
-			ev.RequestMethod = "GET"
-			ev.RequestURL = target
-			ev.ResponseStatus = pr.Status
-		}
-		f.Evidence = ev
-
-		if pr.Extra != "" {
-			f.Extra = map[string]string{"detail": pr.Extra}
-		}
-		findings = append(findings, f)
+		findings = append(findings, findingFromResult(pr, target))
 	}
 
 	reportTarget := target

@@ -70,7 +70,7 @@ func TestBuild_VulnerableOnly(t *testing.T) {
 		},
 	}
 
-	err := r.build(context.Background(), "http://target-domain.com", results)
+	err := r.build(context.Background(), "http://target-domain.com", results, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, "mocked formatted report", buf.String())
@@ -124,7 +124,7 @@ func TestBuild_OfflineTarget(t *testing.T) {
 		},
 	}
 
-	err := r.build(context.Background(), "", results)
+	err := r.build(context.Background(), "", results, nil)
 	require.NoError(t, err)
 
 	require.NotNil(t, mFormatter.report)
@@ -152,7 +152,7 @@ func TestBuild_WriterError(t *testing.T) {
 		Writer:      errWriter{},
 	}}
 
-	err := r.build(context.Background(), "", nil)
+	err := r.build(context.Background(), "", nil, nil)
 	assert.ErrorContains(t, err, "write error")
 }
 
@@ -168,7 +168,7 @@ func TestBuild_FormatterError(t *testing.T) {
 		Writer:      &buf,
 	}}
 
-	err := r.build(context.Background(), "", nil)
+	err := r.build(context.Background(), "", nil, nil)
 	assert.ErrorContains(t, err, "formatter error")
 }
 
@@ -193,7 +193,7 @@ func TestBuild_WithTransportSuccess(t *testing.T) {
 		Transport:   tr,
 	}}
 
-	err := r.build(context.Background(), "", nil)
+	err := r.build(context.Background(), "", nil, nil)
 	require.NoError(t, err)
 }
 
@@ -218,6 +218,6 @@ func TestBuild_WithTransportError(t *testing.T) {
 		Transport:   tr,
 	}}
 
-	err := r.build(context.Background(), "", nil)
+	err := r.build(context.Background(), "", nil, nil)
 	assert.Error(t, err)
 }

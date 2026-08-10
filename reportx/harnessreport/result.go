@@ -14,6 +14,9 @@ type Result struct {
 	CVSSScore   float64
 	CWEID       string
 	OWASP       string
+	CAPECID     string
+	Tags        []string
+	DefExtra    map[string]any
 	Link        string
 	Description string
 }
