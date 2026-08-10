@@ -10,22 +10,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// RegisterFormatFlags binds --format, --output, and --no-color to cmd.
+// RegisterFormatFlags binds --format, --output, and --no-color to cmd. It is
+// idempotent with respect to flags already defined on cmd (e.g. by another
+// flag-registration helper sharing the same flag set) - an existing flag of
+// the same name is left as-is rather than causing a duplicate-registration
+// panic.
 func RegisterFormatFlags(cmd *cobra.Command) {
-	cmd.Flags().String("format", string(format.FormatTerminal),
-		fmt.Sprintf("output format: %s", formatChoices()))
-	cmd.Flags().String("output", "",
-		"file path to write the report (stdout if empty)")
-	cmd.Flags().Bool("no-color", false,
-		"disable ANSI colors in terminal output")
+	if cmd.Flags().Lookup("format") == nil {
+		cmd.Flags().String("format", string(format.FormatTerminal),
+			fmt.Sprintf("output format: %s", formatChoices()))
+	}
+	if cmd.Flags().Lookup("output") == nil {
+		cmd.Flags().String("output", "",
+			"file path to write the report (stdout if empty)")
+	}
+	if cmd.Flags().Lookup("no-color") == nil {
+		cmd.Flags().Bool("no-color", false,
+			"disable ANSI colors in terminal output")
+	}
 }
 
-// RegisterTransportFlags binds --report-url and --report-header to cmd.
+// RegisterTransportFlags binds --report-url and --report-header to cmd. See
+// RegisterFormatFlags for the idempotency note.
 func RegisterTransportFlags(cmd *cobra.Command) {
-	cmd.Flags().String("report-url", "",
-		"HTTP endpoint to POST the report to")
-	cmd.Flags().StringToString("report-header", nil,
-		"additional HTTP headers for the report transport (key=value)")
+	if cmd.Flags().Lookup("report-url") == nil {
+		cmd.Flags().String("report-url", "",
+			"HTTP endpoint to POST the report to")
+	}
+	if cmd.Flags().Lookup("report-header") == nil {
+		cmd.Flags().StringToString("report-header", nil,
+			"additional HTTP headers for the report transport (key=value)")
+	}
 }
 
 // FormatterFromFlags reads --format and --no-color and returns a Formatter.

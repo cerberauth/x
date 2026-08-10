@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cerberauth/harnessx"
+	"github.com/cerberauth/harnessx/checkdef"
 	"github.com/cerberauth/reportx"
-	xharnessx "github.com/cerberauth/x/harnessx"
 	"github.com/cerberauth/x/reportx/harnessreport"
 )
 
@@ -47,7 +47,7 @@ func TestReporter_StampsCheckDefMetadata(t *testing.T) {
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      &buf,
-		CheckDefs: map[harnessx.CheckID]xharnessx.CheckDef{
+		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
 			"alg_none": {
 				Name:        "Algorithm None",
 				Description: "alg=none accepted",
@@ -56,6 +56,9 @@ func TestReporter_StampsCheckDefMetadata(t *testing.T) {
 				CVSSScore:   9.3,
 				CWEID:       "CWE-345",
 				OWASP:       "API2:2023",
+				CAPECID:     "CAPEC-31",
+				Tags:        []string{"jwt", "auth-bypass"},
+				Extra:       map[string]any{"cwe_top25_rank": 5},
 			},
 		},
 	})
@@ -80,7 +83,11 @@ func TestReporter_StampsCheckDefMetadata(t *testing.T) {
 	assert.Equal(t, "alg=none accepted", f.Description)
 	assert.Equal(t, "https://example.com/alg-none", f.URL)
 	assert.Equal(t, "CWE-345", f.CWEID)
+	assert.Equal(t, "API2:2023", f.OwaspTop10)
 	assert.Equal(t, 9.3, f.CVSS40Score)
+	assert.Equal(t, []string{"jwt", "auth-bypass"}, f.Tags)
+	assert.Equal(t, "CAPEC-31", f.Extra["capec_id"])
+	assert.Equal(t, "5", f.Extra["cwe_top25_rank"])
 	assert.Equal(t, "http://target.example", mFormatter.report.Target)
 }
 
@@ -95,7 +102,7 @@ func TestReporter_BaselineCheckExcludedFromFindings(t *testing.T) {
 		Formatter:       mFormatter,
 		Writer:          &buf,
 		BaselineCheckID: "baseline",
-		CheckDefs: map[harnessx.CheckID]xharnessx.CheckDef{
+		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
 			"no_verification": {Name: "no_verification"},
 		},
 	})
@@ -123,7 +130,7 @@ func TestReporter_SkippedCheckDoesNotNeedOnCheckStart(t *testing.T) {
 		Title:       "my-report",
 		Formatter:   mFormatter,
 		Writer:      &buf,
-		CheckDefs: map[harnessx.CheckID]xharnessx.CheckDef{
+		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
 			"hmac_confusion": {Name: "HMAC Confusion"},
 		},
 	})
@@ -140,6 +147,55 @@ func TestReporter_SkippedCheckDoesNotNeedOnCheckStart(t *testing.T) {
 	require.NoError(t, r.Err())
 	// Skipped, non-vulnerable results aren't emitted as findings.
 	assert.Empty(t, mFormatter.report.Findings)
+}
+
+func TestReporter_ObservationsBecomeFindings(t *testing.T) {
+	var buf bytes.Buffer
+	mFormatter := &mockFormatter{}
+
+	r := harnessreport.New(context.Background(), harnessreport.Config{
+		ToolName:    "my-tool",
+		ToolVersion: "1.0.0",
+		Title:       "my-report",
+		Formatter:   mFormatter,
+		Writer:      &buf,
+		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
+			"idor": {
+				Link:      "https://example.com/idor",
+				CWEID:     "CWE-639",
+				OWASP:     "API1:2023",
+				CVSSScore: 8.1,
+				CAPECID:   "CAPEC-39",
+				Tags:      []string{"idor"},
+			},
+		},
+	})
+
+	r.OnCheckComplete(harnessx.Result{
+		CheckID: "idor",
+		Observations: []harnessx.Observation{
+			{
+				Title:       "Resource 42 accessible cross-tenant",
+				Description: "GET /resources/42 returned 200 for a different tenant's token",
+				Evidence:    "HTTP/1.1 200 OK",
+				Metadata:    map[string]string{"resource_id": "42"},
+			},
+		},
+	})
+	r.OnScanComplete(harnessx.ScanSummary{})
+
+	require.NoError(t, r.Err())
+	require.Len(t, mFormatter.report.Findings, 1)
+
+	f := mFormatter.report.Findings[0]
+	assert.Equal(t, "Resource 42 accessible cross-tenant", f.Title)
+	assert.Equal(t, "GET /resources/42 returned 200 for a different tenant's token", f.Description)
+	assert.Equal(t, "CWE-639", f.CWEID)
+	assert.Equal(t, "API1:2023", f.OwaspTop10)
+	assert.Equal(t, []string{"idor"}, f.Tags)
+	assert.Equal(t, "CAPEC-39", f.Extra["capec_id"])
+	assert.Equal(t, "42", f.Extra["resource_id"])
+	assert.False(t, f.Evidence.IsEmpty())
 }
 
 func TestReporter_ErrSurfacesWriterFailure(t *testing.T) {
