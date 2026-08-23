@@ -47,8 +47,7 @@ func TestBuild_VulnerableOnly(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
+		Sinks:       []Sink{{Formatter: mFormatter, Writer: &buf}},
 	}}
 
 	results := []Result{
@@ -112,8 +111,7 @@ func TestBuild_OfflineTarget(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
+		Sinks:       []Sink{{Formatter: mFormatter, Writer: &buf}},
 	}}
 
 	results := []Result{
@@ -148,8 +146,7 @@ func TestBuild_WriterError(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      errWriter{},
+		Sinks:       []Sink{{Formatter: mFormatter, Writer: errWriter{}}},
 	}}
 
 	err := r.build(context.Background(), "", nil, nil)
@@ -164,8 +161,7 @@ func TestBuild_FormatterError(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
+		Sinks:       []Sink{{Formatter: mFormatter, Writer: &buf}},
 	}}
 
 	err := r.build(context.Background(), "", nil, nil)
@@ -188,9 +184,10 @@ func TestBuild_WithTransportSuccess(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
-		Transport:   tr,
+		Sinks: []Sink{
+			{Formatter: mFormatter, Writer: &buf},
+			{Formatter: mFormatter, Transport: tr},
+		},
 	}}
 
 	err := r.build(context.Background(), "", nil, nil)
@@ -213,9 +210,10 @@ func TestBuild_WithTransportError(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
-		Transport:   tr,
+		Sinks: []Sink{
+			{Formatter: mFormatter, Writer: &buf},
+			{Formatter: mFormatter, Transport: tr},
+		},
 	}}
 
 	err := r.build(context.Background(), "", nil, nil)

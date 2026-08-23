@@ -45,8 +45,7 @@ func TestReporter_StampsCheckDefMetadata(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
+		Sinks:       []harnessreport.Sink{{Formatter: mFormatter, Writer: &buf}},
 		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
 			"alg_none": {
 				Name:        "Algorithm None",
@@ -99,8 +98,7 @@ func TestReporter_BaselineCheckExcludedFromFindings(t *testing.T) {
 		ToolName:        "my-tool",
 		ToolVersion:     "1.0.0",
 		Title:           "my-report",
-		Formatter:       mFormatter,
-		Writer:          &buf,
+		Sinks:           []harnessreport.Sink{{Formatter: mFormatter, Writer: &buf}},
 		BaselineCheckID: "baseline",
 		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
 			"no_verification": {Name: "no_verification"},
@@ -128,8 +126,7 @@ func TestReporter_SkippedCheckDoesNotNeedOnCheckStart(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
+		Sinks:       []harnessreport.Sink{{Formatter: mFormatter, Writer: &buf}},
 		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
 			"hmac_confusion": {Name: "HMAC Confusion"},
 		},
@@ -157,8 +154,7 @@ func TestReporter_ObservationsBecomeFindings(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   mFormatter,
-		Writer:      &buf,
+		Sinks:       []harnessreport.Sink{{Formatter: mFormatter, Writer: &buf}},
 		CheckDefs: map[harnessx.CheckID]checkdef.CheckDef{
 			"idor": {
 				Link:      "https://example.com/idor",
@@ -203,8 +199,7 @@ func TestReporter_ErrSurfacesWriterFailure(t *testing.T) {
 		ToolName:    "my-tool",
 		ToolVersion: "1.0.0",
 		Title:       "my-report",
-		Formatter:   &mockFormatter{},
-		Writer:      errWriter{},
+		Sinks:       []harnessreport.Sink{{Formatter: &mockFormatter{}, Writer: errWriter{}}},
 	})
 
 	r.OnScanStart(harnessx.Target{}, 0)
