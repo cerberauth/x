@@ -6,7 +6,6 @@ package harnessreport
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 
 	"github.com/cerberauth/harnessx"
@@ -14,19 +13,19 @@ import (
 	"github.com/cerberauth/reportx"
 	"github.com/cerberauth/reportx/enrich"
 	"github.com/cerberauth/reportx/evidence"
-	"github.com/cerberauth/reportx/format"
 	"github.com/cerberauth/reportx/score"
-	"github.com/cerberauth/reportx/transport"
 )
+
+// Sink is an alias for reportx.Sink, kept so callers configuring a Reporter
+// don't need to import reportx directly for it.
+type Sink = reportx.Sink
 
 // Config configures a Reporter.
 type Config struct {
 	ToolName    string
 	ToolVersion string
 	Title       string
-	Formatter   format.Formatter
-	Writer      io.Writer
-	Transport   *transport.HTTPTransport // nil = no HTTP delivery
+	Sinks       []Sink
 
 	// CheckDefs supplies per-check metadata (name, CVSS, CWE, OWASP, link,
 	// description) that harnessx.Check itself doesn't carry.
@@ -235,11 +234,5 @@ func (r *Reporter) build(ctx context.Context, target string, results []Result, o
 		return err
 	}
 
-	if err := report.WriteTo(ctx, r.cfg.Writer, r.cfg.Formatter); err != nil {
-		return err
-	}
-	if r.cfg.Transport != nil {
-		return report.Send(ctx, r.cfg.Transport, r.cfg.Formatter)
-	}
-	return nil
+	return report.DeliverAll(ctx, r.cfg.Sinks)
 }

@@ -116,6 +116,44 @@ func TestHTTPTransportFromFlags_WithHeaders(t *testing.T) {
 	assert.Equal(t, "Bearer tok", tr.Headers["Authorization"])
 }
 
+func TestSinksFromFlags_TerminalOnlyByDefault(t *testing.T) {
+	cmd := newCmd()
+	sinks, cleanup, err := cobrareportx.SinksFromFlags(cmd)
+	require.NoError(t, err)
+	defer cleanup()
+	require.Len(t, sinks, 1)
+	assert.Equal(t, "text/plain", sinks[0].Formatter.MediaType())
+	assert.Nil(t, sinks[0].Transport)
+}
+
+func TestSinksFromFlags_Quiet(t *testing.T) {
+	cmd := newCmd()
+	require.NoError(t, cmd.Flags().Set("quiet", "true"))
+	sinks, cleanup, err := cobrareportx.SinksFromFlags(cmd)
+	require.NoError(t, err)
+	defer cleanup()
+	assert.Empty(t, sinks)
+}
+
+func TestSinksFromFlags_TerminalAndFileAndTransportSimultaneously(t *testing.T) {
+	cmd := newCmd()
+	path := t.TempDir() + "/report.json"
+	require.NoError(t, cmd.Flags().Set("output", path))
+	require.NoError(t, cmd.Flags().Set("output-format", "json"))
+	require.NoError(t, cmd.Flags().Set("report-url", "https://example.com/reports"))
+	require.NoError(t, cmd.Flags().Set("report-format", "sarif"))
+
+	sinks, cleanup, err := cobrareportx.SinksFromFlags(cmd)
+	require.NoError(t, err)
+	defer cleanup()
+
+	require.Len(t, sinks, 3)
+	assert.Equal(t, "text/plain", sinks[0].Formatter.MediaType())
+	assert.Equal(t, "application/json", sinks[1].Formatter.MediaType())
+	assert.Equal(t, "application/sarif+json", sinks[2].Formatter.MediaType())
+	assert.NotNil(t, sinks[2].Transport)
+}
+
 func TestRegisterFormatFlags_AllFormatsRegistered(t *testing.T) {
 	cmd := newCmd()
 	flag := cmd.Flags().Lookup("format")

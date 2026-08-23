@@ -8,30 +8,40 @@ import (
 	"github.com/cerberauth/reportx/format"
 	"github.com/cerberauth/reportx/transport"
 	"github.com/spf13/cobra"
+
+	"github.com/cerberauth/x/reportx/harnessreport"
 )
 
-// RegisterFormatFlags binds --format, --output, and --no-color to cmd. It is
-// idempotent with respect to flags already defined on cmd (e.g. by another
-// flag-registration helper sharing the same flag set) - an existing flag of
-// the same name is left as-is rather than causing a duplicate-registration
-// panic.
+// RegisterFormatFlags binds --format, --no-color, --quiet, --output, and
+// --output-format to cmd. It is idempotent with respect to flags already
+// defined on cmd (e.g. by another flag-registration helper sharing the same
+// flag set) - an existing flag of the same name is left as-is rather than
+// causing a duplicate-registration panic.
 func RegisterFormatFlags(cmd *cobra.Command) {
 	if cmd.Flags().Lookup("format") == nil {
 		cmd.Flags().String("format", string(format.FormatTerminal),
-			fmt.Sprintf("output format: %s", formatChoices()))
-	}
-	if cmd.Flags().Lookup("output") == nil {
-		cmd.Flags().String("output", "",
-			"file path to write the report (stdout if empty)")
+			fmt.Sprintf("terminal display format: %s", formatChoices()))
 	}
 	if cmd.Flags().Lookup("no-color") == nil {
 		cmd.Flags().Bool("no-color", false,
 			"disable ANSI colors in terminal output")
 	}
+	if cmd.Flags().Lookup("quiet") == nil {
+		cmd.Flags().Bool("quiet", false,
+			"suppress terminal display of the report")
+	}
+	if cmd.Flags().Lookup("output") == nil {
+		cmd.Flags().String("output", "",
+			"file path to additionally write the report to")
+	}
+	if cmd.Flags().Lookup("output-format") == nil {
+		cmd.Flags().String("output-format", string(format.FormatJSON),
+			fmt.Sprintf("format for --output: %s", formatChoices()))
+	}
 }
 
-// RegisterTransportFlags binds --report-url and --report-header to cmd. See
-// RegisterFormatFlags for the idempotency note.
+// RegisterTransportFlags binds --report-url, --report-header, and
+// --report-format to cmd. See RegisterFormatFlags for the idempotency note.
 func RegisterTransportFlags(cmd *cobra.Command) {
 	if cmd.Flags().Lookup("report-url") == nil {
 		cmd.Flags().String("report-url", "",
@@ -41,9 +51,14 @@ func RegisterTransportFlags(cmd *cobra.Command) {
 		cmd.Flags().StringToString("report-header", nil,
 			"additional HTTP headers for the report transport (key=value)")
 	}
+	if cmd.Flags().Lookup("report-format") == nil {
+		cmd.Flags().String("report-format", string(format.FormatJSON),
+			fmt.Sprintf("format for --report-url: %s", formatChoices()))
+	}
 }
 
-// FormatterFromFlags reads --format and --no-color and returns a Formatter.
+// FormatterFromFlags reads --format and --no-color and returns a Formatter
+// for the terminal display sink.
 func FormatterFromFlags(cmd *cobra.Command) (format.Formatter, error) {
 	f, err := cmd.Flags().GetString("format")
 	if err != nil {
@@ -95,6 +110,90 @@ func HTTPTransportFromFlags(cmd *cobra.Command) (*transport.HTTPTransport, error
 		t.Headers = headers
 	}
 	return t, nil
+}
+
+// SinksFromFlags builds every delivery sink requested via flags: a terminal
+// sink to stdout (unless --quiet), a file sink when --output is set, and an
+// HTTP sink when --report-url is set - each with its own format, and all
+// delivered together in a single scan. The caller must invoke the returned
+// cleanup func when done (it closes any file opened for --output).
+func SinksFromFlags(cmd *cobra.Command) ([]harnessreport.Sink, func(), error) {
+	var sinks []harnessreport.Sink
+	cleanup := func() {}
+
+	quiet, err := cmd.Flags().GetBool("quiet")
+	if err != nil {
+		return nil, cleanup, err
+	}
+	if !quiet {
+		f, err := FormatterFromFlags(cmd)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		sinks = append(sinks, harnessreport.Sink{Formatter: f, Writer: os.Stdout})
+	}
+
+	outputSink, outputCleanup, err := outputSinkFromFlags(cmd)
+	if err != nil {
+		return nil, cleanup, err
+	}
+	if outputSink != nil {
+		cleanup = outputCleanup
+		sinks = append(sinks, *outputSink)
+	}
+
+	transportSink, err := transportSinkFromFlags(cmd)
+	if err != nil {
+		return nil, cleanup, err
+	}
+	if transportSink != nil {
+		sinks = append(sinks, *transportSink)
+	}
+
+	return sinks, cleanup, nil
+}
+
+func outputSinkFromFlags(cmd *cobra.Command) (*harnessreport.Sink, func(), error) {
+	outputPath, err := cmd.Flags().GetString("output")
+	if err != nil {
+		return nil, nil, err
+	}
+	if outputPath == "" {
+		return nil, nil, nil
+	}
+
+	outputFormat, err := cmd.Flags().GetString("output-format")
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err := format.NewFormatter(outputFormat)
+	if err != nil {
+		return nil, nil, err
+	}
+	file, err := os.Create(outputPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reportx: create output file: %w", err)
+	}
+	return &harnessreport.Sink{Formatter: f, Writer: file}, func() { file.Close() }, nil
+}
+
+func transportSinkFromFlags(cmd *cobra.Command) (*harnessreport.Sink, error) {
+	tr, err := HTTPTransportFromFlags(cmd)
+	if err != nil {
+		return nil, err
+	}
+	if tr == nil {
+		return nil, nil
+	}
+	reportFormat, err := cmd.Flags().GetString("report-format")
+	if err != nil {
+		return nil, err
+	}
+	f, err := format.NewFormatter(reportFormat)
+	if err != nil {
+		return nil, err
+	}
+	return &harnessreport.Sink{Formatter: f, Transport: tr}, nil
 }
 
 func formatChoices() string {
