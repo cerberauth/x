@@ -2,6 +2,9 @@ package telemetryx
 
 import (
 	"context"
+	"errors"
+	"io"
+	"os"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -156,6 +159,44 @@ func TestNew_ShutdownNoPanicRunsNormally(t *testing.T) {
 	// Normal execution — no panic, shutdown should return nil error.
 	if err := shutdown(ctx); err != nil {
 		t.Errorf("shutdown error on normal path: %v", err)
+	}
+}
+
+// TestNew_SilencesOtelErrorHandler verifies that export failures never leak
+// to stderr. The default OTel error handler logs via the standard log
+// package (which writes to stderr), and CI runners such as GitHub Actions
+// treat any stderr output as a failed step — even when the command itself
+// otherwise succeeded.
+func TestNew_SilencesOtelErrorHandler(t *testing.T) {
+	resetProviders(t)
+	useNoopOtelx(t)
+
+	ctx := context.Background()
+	shutdown, err := New(ctx, "test-service", "1.0.0")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer shutdown(ctx) //nolint:errcheck
+
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error: %v", err)
+	}
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	otel.GetErrorHandler().Handle(errors.New("simulated export failure"))
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("expected no stderr output from OTel error handler, got: %q", out)
 	}
 }
 

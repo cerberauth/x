@@ -53,6 +53,13 @@ func WithBuildDate(date string) Option {
 // all telemetry, and then re-panics so the runtime still sees the original
 // crash.
 func New(ctx context.Context, serviceName string, version string, opts ...Option) (func(context.Context) error, error) {
+	// Telemetry is best-effort: export failures (e.g. the endpoint being
+	// unreachable) must never be surfaced to the caller. Without this, the
+	// OTel SDK's default error handler logs failed exports via the standard
+	// log package, which writes to stderr and can make CI runners (e.g.
+	// GitHub Actions) treat an otherwise successful command as failed.
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {}))
+
 	o := &options{}
 	for _, opt := range opts {
 		opt(o)
