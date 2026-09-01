@@ -38,6 +38,10 @@ func RegisterFormatFlags(cmd *cobra.Command) {
 		cmd.Flags().String("output-format", string(format.FormatJSON),
 			fmt.Sprintf("format for --output: %s", formatChoices()))
 	}
+	if cmd.Flags().Lookup("show-all-findings") == nil {
+		cmd.Flags().Bool("show-all-findings", false,
+			"show every finding on stdout, not just vulnerable ones (other outputs, e.g. --output/--report-url, always include every finding)")
+	}
 }
 
 // RegisterTransportFlags binds --report-url, --report-header, and
@@ -72,6 +76,11 @@ func FormatterFromFlags(cmd *cobra.Command) (format.Formatter, error) {
 		return format.NewTerminalFormatterNoColor(), nil
 	}
 	return format.NewFormatter(f)
+}
+
+// ShowAllFindingsFromFlags reads --show-all-findings, for harnessreport.Config.ShowAllFindings.
+func ShowAllFindingsFromFlags(cmd *cobra.Command) (bool, error) {
+	return cmd.Flags().GetBool("show-all-findings")
 }
 
 // WriterFromFlags opens the destination specified by --output (stdout if empty).
