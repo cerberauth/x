@@ -221,15 +221,7 @@ func findingFromResult(pr Result, target string) reportx.Finding {
 // stdout is the one exception, where only vulnerable findings are shown
 // unless Config.ShowAllFindings is set.
 func (r *Reporter) build(ctx context.Context, target string, results []Result, obsFindings []reportx.Finding) error {
-	findings := append([]reportx.Finding{}, obsFindings...)
-	vulnerable := make([]bool, len(obsFindings))
-	for i := range vulnerable {
-		vulnerable[i] = true
-	}
-	for _, pr := range results {
-		findings = append(findings, findingFromResult(pr, target))
-		vulnerable = append(vulnerable, pr.Vulnerable)
-	}
+	findings, vulnerable := mergeFindings(obsFindings, results, target)
 
 	reportTarget := target
 	if reportTarget == "" {
@@ -251,6 +243,23 @@ func (r *Reporter) build(ctx context.Context, target string, results []Result, o
 		return report.DeliverAll(ctx, r.cfg.Sinks)
 	}
 
+	return r.deliverVulnerableOnly(ctx, report, vulnerable)
+}
+
+func mergeFindings(obsFindings []reportx.Finding, results []Result, target string) ([]reportx.Finding, []bool) {
+	findings := append([]reportx.Finding{}, obsFindings...)
+	vulnerable := make([]bool, len(obsFindings))
+	for i := range vulnerable {
+		vulnerable[i] = true
+	}
+	for _, pr := range results {
+		findings = append(findings, findingFromResult(pr, target))
+		vulnerable = append(vulnerable, pr.Vulnerable)
+	}
+	return findings, vulnerable
+}
+
+func (r *Reporter) deliverVulnerableOnly(ctx context.Context, report *reportx.Report, vulnerable []bool) error {
 	vulnOnly := *report
 	vulnOnly.Findings = nil
 	for i, f := range report.Findings {
