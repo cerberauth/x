@@ -5,7 +5,9 @@ package harnessreport
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/cerberauth/harnessx"
@@ -26,6 +28,13 @@ type Config struct {
 	ToolVersion string
 	Title       string
 	Sinks       []Sink
+
+	// ShowAllFindings disables the default behavior of only writing
+	// vulnerable findings to stdout - with it set, stdout gets every
+	// finding, vulnerable or not, just like every other sink. Sinks other
+	// than stdout (files, HTTP transports, ...) always receive every
+	// finding regardless of this flag.
+	ShowAllFindings bool
 
 	// CheckDefs supplies per-check metadata (name, CVSS, CWE, OWASP, link,
 	// description) that harnessx.Check itself doesn't carry.
@@ -208,14 +217,18 @@ func findingFromResult(pr Result, target string) reportx.Finding {
 }
 
 // build constructs a reportx.Report from accumulated results and
-// writes/sends it.
+// writes/sends it. Every finding, vulnerable or not, is part of the report;
+// stdout is the one exception, where only vulnerable findings are shown
+// unless Config.ShowAllFindings is set.
 func (r *Reporter) build(ctx context.Context, target string, results []Result, obsFindings []reportx.Finding) error {
 	findings := append([]reportx.Finding{}, obsFindings...)
+	vulnerable := make([]bool, len(obsFindings))
+	for i := range vulnerable {
+		vulnerable[i] = true
+	}
 	for _, pr := range results {
-		if !pr.Vulnerable {
-			continue
-		}
 		findings = append(findings, findingFromResult(pr, target))
+		vulnerable = append(vulnerable, pr.Vulnerable)
 	}
 
 	reportTarget := target
@@ -234,5 +247,33 @@ func (r *Reporter) build(ctx context.Context, target string, results []Result, o
 		return err
 	}
 
-	return report.DeliverAll(ctx, r.cfg.Sinks)
+	if r.cfg.ShowAllFindings {
+		return report.DeliverAll(ctx, r.cfg.Sinks)
+	}
+
+	vulnOnly := *report
+	vulnOnly.Findings = nil
+	for i, f := range report.Findings {
+		if vulnerable[i] {
+			vulnOnly.Findings = append(vulnOnly.Findings, f)
+		}
+	}
+
+	var errs []error
+	for _, s := range r.cfg.Sinks {
+		rep := report
+		if isStdout(s) {
+			rep = &vulnOnly
+		}
+		if err := rep.DeliverAll(ctx, []Sink{s}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// isStdout reports whether s writes directly to stdout - the one sink whose
+// display is limited to vulnerable findings by default.
+func isStdout(s Sink) bool {
+	return s.Writer == os.Stdout
 }

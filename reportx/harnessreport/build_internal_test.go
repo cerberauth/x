@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,18 @@ import (
 	"github.com/cerberauth/reportx/score"
 	"github.com/cerberauth/reportx/transport"
 )
+
+func withStdout(t *testing.T) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stdout")
+	require.NoError(t, err)
+	orig := os.Stdout
+	os.Stdout = f
+	t.Cleanup(func() {
+		os.Stdout = orig
+		f.Close()
+	})
+}
 
 type mockFormatter struct {
 	report *reportx.Report
@@ -39,7 +52,7 @@ func (errWriter) Write(p []byte) (n int, err error) {
 	return 0, errors.New("write error")
 }
 
-func TestBuild_VulnerableOnly(t *testing.T) {
+func TestBuild_EveryFindingOnNonStdoutSink(t *testing.T) {
 	var buf bytes.Buffer
 	mFormatter := &mockFormatter{}
 
@@ -80,7 +93,8 @@ func TestBuild_VulnerableOnly(t *testing.T) {
 	assert.Equal(t, "my-report", mFormatter.report.Title)
 	assert.Equal(t, "http://target-domain.com", mFormatter.report.Target)
 
-	require.Len(t, mFormatter.report.Findings, 1)
+	// A non-stdout sink gets every finding, vulnerable or not.
+	require.Len(t, mFormatter.report.Findings, 2)
 	f := mFormatter.report.Findings[0]
 	assert.Equal(t, "CheckVulnerable", f.ID)
 	assert.Equal(t, "CheckVulnerable", f.Title)
@@ -218,4 +232,62 @@ func TestBuild_WithTransportError(t *testing.T) {
 
 	err := r.build(context.Background(), "", nil, nil)
 	assert.Error(t, err)
+}
+
+func TestBuild_StdoutOnlyVulnerableByDefault(t *testing.T) {
+	withStdout(t)
+
+	stdoutFormatter := &mockFormatter{}
+	var fileBuf bytes.Buffer
+	fileFormatter := &mockFormatter{}
+
+	r := &Reporter{cfg: Config{
+		ToolName:    "my-tool",
+		ToolVersion: "1.0.0",
+		Title:       "my-report",
+		Sinks: []Sink{
+			{Formatter: stdoutFormatter, Writer: os.Stdout},
+			{Formatter: fileFormatter, Writer: &fileBuf},
+		},
+	}}
+
+	results := []Result{
+		{Name: "CheckVulnerable", Vulnerable: true},
+		{Name: "CheckNotVulnerable", Vulnerable: false},
+	}
+
+	err := r.build(context.Background(), "", results, nil)
+	require.NoError(t, err)
+
+	require.NotNil(t, stdoutFormatter.report)
+	require.Len(t, stdoutFormatter.report.Findings, 1)
+	assert.Equal(t, "CheckVulnerable", stdoutFormatter.report.Findings[0].ID)
+
+	require.NotNil(t, fileFormatter.report)
+	require.Len(t, fileFormatter.report.Findings, 2)
+}
+
+func TestBuild_ShowAllFindingsIncludesEverythingOnStdout(t *testing.T) {
+	withStdout(t)
+
+	stdoutFormatter := &mockFormatter{}
+
+	r := &Reporter{cfg: Config{
+		ToolName:        "my-tool",
+		ToolVersion:     "1.0.0",
+		Title:           "my-report",
+		ShowAllFindings: true,
+		Sinks:           []Sink{{Formatter: stdoutFormatter, Writer: os.Stdout}},
+	}}
+
+	results := []Result{
+		{Name: "CheckVulnerable", Vulnerable: true},
+		{Name: "CheckNotVulnerable", Vulnerable: false},
+	}
+
+	err := r.build(context.Background(), "", results, nil)
+	require.NoError(t, err)
+
+	require.NotNil(t, stdoutFormatter.report)
+	require.Len(t, stdoutFormatter.report.Findings, 2)
 }

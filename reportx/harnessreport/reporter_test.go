@@ -142,8 +142,8 @@ func TestReporter_SkippedCheckDoesNotNeedOnCheckStart(t *testing.T) {
 	r.OnScanComplete(harnessx.ScanSummary{})
 
 	require.NoError(t, r.Err())
-	// Skipped, non-vulnerable results aren't emitted as findings.
-	assert.Empty(t, mFormatter.report.Findings)
+	require.Len(t, mFormatter.report.Findings, 1)
+	assert.Equal(t, "HMAC Confusion", mFormatter.report.Findings[0].ID)
 }
 
 func TestReporter_ObservationsBecomeFindings(t *testing.T) {
