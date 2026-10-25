@@ -72,7 +72,7 @@ func FormatterFromFlags(cmd *cobra.Command) (format.Formatter, error) {
 	if err != nil {
 		return nil, err
 	}
-	if (format.FormatName(f) == format.FormatTerminal || f == "text" || f == "plain") && noColor {
+	if isTerminalFormat(f) && noColor {
 		return format.NewTerminalFormatterNoColor(), nil
 	}
 	return format.NewFormatter(f)
@@ -218,4 +218,37 @@ func formatChoices() string {
 		result += n
 	}
 	return result
+}
+
+// WriteStatus writes human-oriented status text (progress, success/warning/error
+// summaries) so it never corrupts a machine-readable report.
+//
+// The message goes to cmd.OutOrStdout() only when the effective format is
+// terminal and --output is unset; in every other case (a machine-readable
+// --format, or --output pointing at a file) it goes to cmd.ErrOrStderr().
+//
+// Commands must use WriteStatus for human status text, never fmt.Println or
+// fmt.Print, which would write to stdout ahead of the report.
+func WriteStatus(cmd *cobra.Command, msg string) {
+	if isTerminalStdout(cmd) {
+		fmt.Fprint(cmd.OutOrStdout(), msg)
+		return
+	}
+	fmt.Fprint(cmd.ErrOrStderr(), msg)
+}
+
+// isTerminalStdout reports whether the report is rendered as terminal text on stdout.
+func isTerminalStdout(cmd *cobra.Command) bool {
+	if path, err := cmd.Flags().GetString("output"); err == nil && path != "" {
+		return false
+	}
+	f, err := cmd.Flags().GetString("format")
+	if err != nil {
+		return true
+	}
+	return isTerminalFormat(f)
+}
+
+func isTerminalFormat(f string) bool {
+	return format.FormatName(f) == format.FormatTerminal || f == "text" || f == "plain"
 }

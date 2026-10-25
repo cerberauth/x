@@ -1,6 +1,7 @@
 package reportx_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/cerberauth/reportx/format"
@@ -164,4 +165,52 @@ func TestRegisterFormatFlags_AllFormatsRegistered(t *testing.T) {
 		require.NoError(t, err, "format %s should be valid", name)
 		assert.NotNil(t, f)
 	}
+}
+
+func TestWriteStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     string
+		output     bool
+		wantStdout string
+		wantStderr string
+	}{
+		{"terminal no output", "terminal", false, "status\n", ""},
+		{"text alias no output", "text", false, "status\n", ""},
+		{"plain alias no output", "plain", false, "status\n", ""},
+		{"terminal with output", "terminal", true, "", "status\n"},
+		{"json no output", "json", false, "", "status\n"},
+		{"json with output", "json", true, "", "status\n"},
+		{"sarif no output", "sarif", false, "", "status\n"},
+		{"yaml with output", "yaml", true, "", "status\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newCmd()
+			require.NoError(t, cmd.Flags().Set("format", tt.format))
+			if tt.output {
+				require.NoError(t, cmd.Flags().Set("output", t.TempDir()+"/report"))
+			}
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+
+			cobrareportx.WriteStatus(cmd, "status\n")
+
+			assert.Equal(t, tt.wantStdout, stdout.String())
+			assert.Equal(t, tt.wantStderr, stderr.String())
+		})
+	}
+}
+
+func TestWriteStatus_NoFormatFlags(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	cobrareportx.WriteStatus(cmd, "status\n")
+
+	assert.Equal(t, "status\n", stdout.String())
+	assert.Empty(t, stderr.String())
 }
