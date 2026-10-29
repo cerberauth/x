@@ -82,6 +82,30 @@ func TestGetMeterProvider_ReturnsInitializedProvider(t *testing.T) {
 	}
 }
 
+func TestNew_DoNotTrackSkipsSetup(t *testing.T) {
+	resetProviders(t)
+	t.Setenv("DO_NOT_TRACK", "1")
+
+	called := false
+	orig := otelxNew
+	otelxNew = func(context.Context, string, string, ...otelx.Option) (func(context.Context) error, error) {
+		called = true
+		return func(context.Context) error { return nil }, nil
+	}
+	t.Cleanup(func() { otelxNew = orig })
+
+	shutdown, err := New(context.Background(), "test-service", "1.0.0")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	if called {
+		t.Error("expected DO_NOT_TRACK to skip telemetry setup")
+	}
+	if err := shutdown(context.Background()); err != nil {
+		t.Errorf("shutdown error: %v", err)
+	}
+}
+
 func TestNew_ReturnsShutdownFunc(t *testing.T) {
 	resetProviders(t)
 	useNoopOtelx(t)
@@ -100,6 +124,7 @@ func TestNew_ReturnsShutdownFunc(t *testing.T) {
 }
 
 func TestNew_SetsGlobalMeterProvider(t *testing.T) {
+	t.Setenv("DO_NOT_TRACK", "") // New honors it; keep a developer's own setting out of the test
 	resetProviders(t)
 	useNoopOtelx(t)
 
@@ -201,6 +226,7 @@ func TestNew_SilencesOtelErrorHandler(t *testing.T) {
 }
 
 func TestNew_ForwardsCIAttributesToOtelx(t *testing.T) {
+	t.Setenv("DO_NOT_TRACK", "") // New honors it; keep a developer's own setting out of the test
 	resetProviders(t)
 	clearCIEnv(t)
 	captured := captureOtelxOpts(t)
