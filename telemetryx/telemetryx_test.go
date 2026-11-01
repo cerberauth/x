@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
-	globallog "go.opentelemetry.io/otel/log/global"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
 	"github.com/cerberauth/x/otelx"
@@ -19,12 +18,12 @@ func resetProviders(t *testing.T) {
 	origMP := meterProvider
 	prevTP := otel.GetTracerProvider()
 	prevMP := otel.GetMeterProvider()
-	prevLP := globallog.GetLoggerProvider()
+	prevLP := otel.GetLoggerProvider()
 	t.Cleanup(func() {
 		meterProvider = origMP
 		otel.SetTracerProvider(prevTP)
 		otel.SetMeterProvider(prevMP)
-		globallog.SetLoggerProvider(prevLP)
+		otel.SetLoggerProvider(prevLP)
 	})
 }
 

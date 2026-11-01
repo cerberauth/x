@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	globallog "go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -142,7 +141,7 @@ func New(ctx context.Context, serviceName, version string, opts ...Option) (func
 		return nil, err
 	}
 	shutdownFuncs = append(shutdownFuncs, lp.Shutdown)
-	globallog.SetLoggerProvider(lp)
+	otel.SetLoggerProvider(lp)
 
 	return shutdown, nil
 }

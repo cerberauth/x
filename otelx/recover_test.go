@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
-	globallog "go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -38,13 +38,13 @@ func setupTraceAndLog(t *testing.T) (ctx context.Context, endSpan func(), spanEx
 		sdklog.WithProcessor(sdklog.NewSimpleProcessor(logExp)),
 	)
 
-	prevLP := globallog.GetLoggerProvider()
+	prevLP := otel.GetLoggerProvider()
 	t.Cleanup(func() {
 		_ = tp.Shutdown(context.Background())
 		_ = lp.Shutdown(context.Background())
-		globallog.SetLoggerProvider(prevLP)
+		otel.SetLoggerProvider(prevLP)
 	})
-	globallog.SetLoggerProvider(lp)
+	otel.SetLoggerProvider(lp)
 
 	var span trace.Span
 	ctx, span = tp.Tracer("test").Start(context.Background(), "test-span")

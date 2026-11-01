@@ -6,7 +6,6 @@ import (
 
 	"go.opentelemetry.io/otel"
 	otellog "go.opentelemetry.io/otel/log"
-	globallog "go.opentelemetry.io/otel/log/global"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/trace"
 
@@ -131,5 +130,5 @@ func GetTracerProvider() trace.TracerProvider {
 
 // GetLoggerProvider returns the global LoggerProvider set by New.
 func GetLoggerProvider() otellog.LoggerProvider {
-	return globallog.GetLoggerProvider()
+	return otel.GetLoggerProvider()
 }

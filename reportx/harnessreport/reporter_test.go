@@ -207,3 +207,64 @@ func TestReporter_ErrSurfacesWriterFailure(t *testing.T) {
 
 	assert.ErrorContains(t, r.Err(), "write error")
 }
+
+func TestReporter_RecordsScanErrorsAndCoverage(t *testing.T) {
+	var buf bytes.Buffer
+	mFormatter := &mockFormatter{}
+
+	r := harnessreport.New(context.Background(), harnessreport.Config{
+		ToolName: "my-tool",
+		Sinks:    []harnessreport.Sink{{Formatter: mFormatter, Writer: &buf}},
+	})
+
+	r.OnScanStart(harnessx.Target{URL: "http://target.example"}, 4)
+	r.OnCheckComplete(harnessx.Result{
+		CheckID: "passed_check",
+		Data:    harnessreport.Result{Name: "Passed"},
+	})
+	r.OnCheckComplete(harnessx.Result{
+		CheckID:    "skipped_check",
+		Skipped:    true,
+		SkipReason: "not applicable",
+	})
+	r.OnCheckComplete(harnessx.Result{
+		CheckID:    "timeout_check",
+		ResourceID: "/users",
+		Err:        errors.New("context deadline exceeded"),
+	})
+	// An error wins over a skip, so a failed check is never reported as skipped.
+	r.OnCheckComplete(harnessx.Result{
+		CheckID: "both_check",
+		Skipped: true,
+		Err:     errors.New("boom"),
+	})
+	r.OnScanComplete(harnessx.ScanSummary{})
+
+	require.NoError(t, r.Err())
+	require.NotNil(t, mFormatter.report)
+
+	assert.Equal(t, reportx.Coverage{Run: 1, Skipped: 1, Errored: 2}, mFormatter.report.Coverage)
+	assert.Equal(t, []reportx.ScanError{
+		{CheckID: "timeout_check", Resource: "/users", Message: "context deadline exceeded"},
+		{CheckID: "both_check", Message: "boom"},
+	}, mFormatter.report.Errors)
+}
+
+func TestReporter_BaselineErrorIsRecorded(t *testing.T) {
+	var buf bytes.Buffer
+	mFormatter := &mockFormatter{}
+
+	r := harnessreport.New(context.Background(), harnessreport.Config{
+		Sinks:           []harnessreport.Sink{{Formatter: mFormatter, Writer: &buf}},
+		BaselineCheckID: "baseline",
+	})
+
+	r.OnCheckComplete(harnessx.Result{CheckID: "baseline", Err: errors.New("unreachable")})
+	r.OnScanComplete(harnessx.ScanSummary{})
+
+	require.NoError(t, r.Err())
+	assert.Empty(t, mFormatter.report.Findings)
+	assert.Equal(t, 1, mFormatter.report.Coverage.Errored)
+	require.Len(t, mFormatter.report.Errors, 1)
+	assert.Equal(t, "baseline", mFormatter.report.Errors[0].CheckID)
+}

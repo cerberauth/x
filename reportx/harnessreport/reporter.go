@@ -56,6 +56,8 @@ type Reporter struct {
 	target      string
 	results     []Result
 	obsFindings []reportx.Finding
+	scanErrors  []reportx.ScanError
+	coverage    reportx.Coverage
 	err         error
 }
 
@@ -73,6 +75,8 @@ func (r *Reporter) OnScanStart(target harnessx.Target, _ int) {
 func (r *Reporter) OnCheckStart(harnessx.Check, harnessx.Target, *harnessx.Resource) {}
 
 func (r *Reporter) OnCheckComplete(result harnessx.Result) {
+	r.recordScanStatus(result)
+
 	if r.cfg.BaselineCheckID != "" && result.CheckID == r.cfg.BaselineCheckID {
 		return
 	}
@@ -114,6 +118,30 @@ func (r *Reporter) OnCheckComplete(result harnessx.Result) {
 	r.results = append(r.results, pr)
 	r.obsFindings = append(r.obsFindings, obsFindings...)
 	r.mu.Unlock()
+}
+
+// recordScanStatus counts result towards the report's coverage and, if the
+// check failed, records it as a scan error so the report doesn't read as "no
+// issue" for something that was never fully evaluated. Every result counts,
+// including the baseline check's, since a failed baseline invalidates the
+// checks compared against it.
+func (r *Reporter) recordScanStatus(result harnessx.Result) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	switch result.Status() {
+	case harnessx.StatusError:
+		r.coverage.Errored++
+		r.scanErrors = append(r.scanErrors, reportx.ScanError{
+			CheckID:  string(result.CheckID),
+			Resource: result.ResourceID,
+			Message:  result.Err.Error(),
+		})
+	case harnessx.StatusSkipped:
+		r.coverage.Skipped++
+	default:
+		r.coverage.Run++
+	}
 }
 
 // findingFromObservation converts a harnessx.Observation — a check-emitted,
@@ -223,6 +251,11 @@ func findingFromResult(pr Result, target string) reportx.Finding {
 func (r *Reporter) build(ctx context.Context, target string, results []Result, obsFindings []reportx.Finding) error {
 	findings, vulnerable := mergeFindings(obsFindings, results, target)
 
+	r.mu.Lock()
+	scanErrors := append([]reportx.ScanError(nil), r.scanErrors...)
+	coverage := r.coverage
+	r.mu.Unlock()
+
 	reportTarget := target
 	if reportTarget == "" {
 		reportTarget = "(offline)"
@@ -233,6 +266,8 @@ func (r *Reporter) build(ctx context.Context, target string, results []Result, o
 		Target(reportTarget).
 		Title(r.cfg.Title).
 		Findings(findings).
+		Errors(scanErrors).
+		Coverage(coverage.Run, coverage.Skipped, coverage.Errored).
 		Enrich(enrich.EnrichAll).
 		Build(ctx)
 	if err != nil {
