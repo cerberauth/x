@@ -2,9 +2,11 @@ package telemetryx
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/getargvio/argvio-go"
 	"github.com/getargvio/argvio-go/cobrasdk"
@@ -64,6 +66,7 @@ func Instrument(root *cobra.Command, version, apiKey string, opts ...InstrumentO
 			argvio.StaticProvider{Tier: argvio.TierBasic},
 		)),
 	}
+	argvioOpts = append(argvioOpts, cfg.sessionOpt...)
 	if optedOut(os.Args[1:]) {
 		argvioOpts = append(argvioOpts, argvio.WithDisabled())
 	}
@@ -83,6 +86,58 @@ type InstrumentOption func(*instrumentConfig)
 
 type instrumentConfig struct {
 	classifier Classifier
+	sessionOpt []argvio.Option
+}
+
+// errUnavailable is what a lazy session callback panics with to leave its
+// attribute out. argvio recovers a panicking callback and sends nothing for
+// it (see argvio.WithConfigCustomizedCountFunc), which is the only way a
+// callback can say "not known for this run".
+var errUnavailable = errors.New("telemetryx: session attribute not available")
+
+// lazy adapts a callback that can say "not available" to the shape argvio
+// takes.
+func lazy[T any](fn func() (T, bool)) func() T {
+	return func() T {
+		v, ok := fn()
+		if !ok {
+			panic(errUnavailable)
+		}
+		return v
+	}
+}
+
+// WithConfigCustomizedCount reports how many of the CLI's configuration keys
+// the user has set to something other than the default, on the session start
+// event. fn returns false when the count isn't known for this run (for example
+// the command doesn't read a config file), and then nothing is sent.
+//
+// fn runs once, when the command starts and flags have been parsed, and only
+// when the user's consent tier allows it, so it never runs for a user who has
+// opted out or in CI. Keep it fast. Only the count is sent, never a key name or
+// a value; argvio clamps it to [0, 1000].
+func WithConfigCustomizedCount(fn func() (n int, ok bool)) InstrumentOption {
+	return func(c *instrumentConfig) {
+		if fn != nil {
+			c.sessionOpt = append(c.sessionOpt, argvio.WithConfigCustomizedCountFunc(lazy(fn)))
+		}
+	}
+}
+
+// WithAuthState reports whether the user is signed in to the CLI vendor's own
+// service, on the session start event. fn returns false when the state isn't
+// known, and then nothing is sent. It is for CLIs that have an account of
+// their own; do not use it for the credentials a CLI sends to a target it
+// scans.
+//
+// fn runs once, under the same conditions as WithConfigCustomizedCount. Nothing
+// about the account (name, ID, token) can be passed.
+func WithAuthState(fn func() (state argvio.AuthState, ok bool)) InstrumentOption {
+	return func(c *instrumentConfig) {
+		if fn != nil {
+			c.sessionOpt = append(c.sessionOpt, argvio.WithAuthStateFunc(lazy(fn)))
+		}
+	}
 }
 
 // WithClassifier replaces the default error classifier, which maps deadlines,
@@ -138,6 +193,17 @@ func exit(cmd *cobra.Command, err error, code int) {
 	osExit(code)
 }
 
+// Execute runs root like root.Execute and also records a mistyped command, as
+// an unknown-command attempt with the nearest command as suggestion and without
+// the text the user typed. Use it in main instead of root.Execute: cobra fails
+// on an unknown root subcommand before any hook runs, so Instrument alone can't
+// see it. (A mistyped subcommand of a parent that has none to run is recorded
+// by Instrument.) It returns exactly the error root.Execute would, so the CLI's
+// output and exit code don't change, and it is safe to call without Instrument.
+func Execute(root *cobra.Command) error {
+	return cobrasdk.Execute(root, argvioClient)
+}
+
 // Feature records that the user used one of the CLI's capabilities, so it
 // shows up in Argvio's feature discovery. It is a no-op until Instrument has
 // run, when telemetry is disabled, and at the anonymous tier (CI runs).
@@ -180,4 +246,35 @@ func optedOut(args []string) bool {
 	fs.BoolP("help", "h", false, "")
 	_ = fs.Parse(args)
 	return *optOut
+}
+
+// Duration records how long something took, for timings the command's own
+// duration doesn't cover ("external tool run time"), as a histogram per name,
+// label and command. It is a no-op until Instrument has run, when telemetry is
+// disabled, and for d <= 0.
+//
+// WARNING: durations are accepted at the anonymous tier, so they are also sent
+// from CI and when the user granted no consent. name and label must be fixed
+// identifiers chosen in code ("crack.external-tool", "john"). Never pass user
+// input, file paths, host names, URLs, tokens or anything derived from them;
+// use Vocab for a value read from input. Argvio does not scrub them; it only
+// drops a name or label that doesn't match ^[a-z0-9][a-z0-9._-]*$ or is longer
+// than 64 bytes.
+func Duration(ctx context.Context, name string, d time.Duration, label string) {
+	var opts []argvio.MeasureOption
+	if label != "" {
+		opts = append(opts, argvio.WithMeasureLabel(label))
+	}
+	argvioClient.RecordDuration(ctx, name, d, opts...)
+}
+
+// Timer starts timing and returns a function that records the elapsed time
+// with Duration when called, so it can be deferred:
+//
+//	defer telemetryx.Timer(ctx, "openapi.load", "")()
+//
+// The same rules as Duration apply to name and label.
+func Timer(ctx context.Context, name, label string) func() {
+	start := time.Now()
+	return func() { Duration(ctx, name, time.Since(start), label) }
 }
