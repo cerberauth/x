@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	globallog "go.opentelemetry.io/otel/log/global"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -53,11 +52,11 @@ func resetGlobals(t *testing.T) {
 	t.Helper()
 	prevMP := otel.GetMeterProvider()
 	prevTP := otel.GetTracerProvider()
-	prevLP := globallog.GetLoggerProvider()
+	prevLP := otel.GetLoggerProvider()
 	t.Cleanup(func() {
 		otel.SetMeterProvider(prevMP)
 		otel.SetTracerProvider(prevTP)
-		globallog.SetLoggerProvider(prevLP)
+		otel.SetLoggerProvider(prevLP)
 	})
 }
 
@@ -95,7 +94,7 @@ func TestNew_SetsAllThreeGlobalProviders(t *testing.T) {
 	if _, ok := otel.GetTracerProvider().(*sdktrace.TracerProvider); !ok {
 		t.Error("expected global TracerProvider to be *sdktrace.TracerProvider")
 	}
-	if _, ok := globallog.GetLoggerProvider().(*sdklog.LoggerProvider); !ok {
+	if _, ok := otel.GetLoggerProvider().(*sdklog.LoggerProvider); !ok {
 		t.Error("expected global LoggerProvider to be *sdklog.LoggerProvider")
 	}
 }

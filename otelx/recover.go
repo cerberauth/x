@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"runtime/debug"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	otellog "go.opentelemetry.io/otel/log"
-	globallog "go.opentelemetry.io/otel/log/global"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -36,7 +36,7 @@ func ReportPanic(ctx context.Context, r any) {
 	)
 	span.SetStatus(codes.Error, msg)
 
-	logger := globallog.GetLoggerProvider().Logger(recoverLoggerName)
+	logger := otel.GetLoggerProvider().Logger(recoverLoggerName)
 	var rec otellog.Record
 	rec.SetSeverity(otellog.SeverityFatal)
 	rec.SetBody(attribute.StringValue(msg))
