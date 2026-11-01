@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/getargvio/argvio-go"
 	"github.com/spf13/cobra"
@@ -286,6 +287,12 @@ func TestFeatureAndCounter_AreSafeBeforeInstrumentAndWhenDisabled(t *testing.T) 
 // returns the metrics and logs payloads the collector received.
 func collect(t *testing.T, fn func(ctx context.Context)) (metrics, logs string) {
 	t.Helper()
+	return collectWith(t, nil, func(_ *cobra.Command, ctx context.Context) { fn(ctx) })
+}
+
+// collectWith is collect with Instrument options, and fn also gets the root.
+func collectWith(t *testing.T, opts []InstrumentOption, fn func(root *cobra.Command, ctx context.Context)) (metrics, logs string) {
+	t.Helper()
 	var mu sync.Mutex
 	bodies := map[string][]byte{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -302,9 +309,10 @@ func collect(t *testing.T, fn func(ctx context.Context)) (metrics, logs string) 
 	t.Cleanup(func() { argvioClient = origClient })
 
 	var ran bool
-	shutdown := Instrument(newTestRoot(&ran), "1.0.0", "argv_live_pub_test")
+	root := newTestRoot(&ran)
+	shutdown := Instrument(root, "1.0.0", "argv_live_pub_test", opts...)
 	ctx := context.Background()
-	fn(ctx)
+	fn(root, ctx)
 	if err := shutdown(ctx); err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}
@@ -351,6 +359,163 @@ func TestFeatureAndCounter_InCIOnlyCountersAreSent(t *testing.T) {
 	if strings.Contains(logs, "crack.john-detected") {
 		t.Error("expected the feature not to be sent from CI")
 	}
+}
+
+func TestDuration_IsSentToTheCollector(t *testing.T) {
+	isolateArgvioEnv(t)
+	metrics, _ := collect(t, func(ctx context.Context) {
+		Duration(ctx, "crack.external-tool", 1500*time.Millisecond, "john")
+		Duration(ctx, "Not Valid", time.Second, "")
+		Duration(ctx, "crack.zero", 0, "")
+		Timer(ctx, "openapi.load", "")()
+	})
+
+	for _, want := range []string{"cli.measure", "crack.external-tool", "john", "openapi.load"} {
+		if !strings.Contains(metrics, want) {
+			t.Errorf("expected the metrics payload to contain %q", want)
+		}
+	}
+	for _, dropped := range []string{"Not Valid", "crack.zero"} {
+		if strings.Contains(metrics, dropped) {
+			t.Errorf("expected %q to be dropped", dropped)
+		}
+	}
+}
+
+// Durations, like counters, are accepted at the anonymous tier.
+func TestDuration_InCIIsStillSent(t *testing.T) {
+	isolateArgvioEnv(t)
+	t.Setenv("CI", "true")
+	metrics, _ := collect(t, func(ctx context.Context) {
+		Duration(ctx, "crack.external-tool", time.Second, "")
+	})
+	if !strings.Contains(metrics, "crack.external-tool") {
+		t.Error("expected the duration to be sent from CI")
+	}
+}
+
+func TestSessionStart_ReportsEnvironmentConfigAndAuthState(t *testing.T) {
+	isolateArgvioEnv(t)
+	t.Setenv("SHELL", "/bin/zsh")
+	var configRuns int
+	_, logs := collectWith(t, []InstrumentOption{
+		WithConfigCustomizedCount(func() (int, bool) { configRuns++; return 7, true }),
+		WithAuthState(func() (argvio.AuthState, bool) { return argvio.AuthStateAuthenticated, true }),
+	}, func(root *cobra.Command, ctx context.Context) {
+		root.SetArgs([]string{"sub"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("Execute() error: %v", err)
+		}
+	})
+
+	for _, want := range []string{"cli.session.started", "cli.shell", "zsh", "cli.stdout.is_tty", "cli.config.customized_count", "cli.auth.state", "authenticated"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("expected the session start event to contain %q", want)
+		}
+	}
+	if configRuns != 1 {
+		t.Errorf("expected the config callback to run once, ran %d times", configRuns)
+	}
+}
+
+func TestSessionStart_LeavesOutWhatIsNotAvailable(t *testing.T) {
+	isolateArgvioEnv(t)
+	_, logs := collectWith(t, []InstrumentOption{
+		WithConfigCustomizedCount(func() (int, bool) { return 0, false }),
+		WithAuthState(func() (argvio.AuthState, bool) { return argvio.AuthStateUnknown, false }),
+	}, func(root *cobra.Command, ctx context.Context) {
+		root.SetArgs([]string{"sub"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("Execute() error: %v", err)
+		}
+	})
+
+	if !strings.Contains(logs, "cli.session.started") {
+		t.Fatal("expected a session start event")
+	}
+	for _, absent := range []string{"cli.config.customized_count", "cli.auth.state"} {
+		if strings.Contains(logs, absent) {
+			t.Errorf("expected %q to be left out when not available", absent)
+		}
+	}
+}
+
+// The callbacks read the user's config and credentials, so they must not run
+// when telemetry is off or the run is anonymous.
+func TestSessionStart_CallbacksDoNotRunWithoutConsent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{"in CI", map[string]string{"CI": "true"}, []string{"sub"}},
+		{"opted out by flag", nil, []string{"sub", "--sqa-opt-out"}},
+		{"opted out by DO_NOT_TRACK", map[string]string{"DO_NOT_TRACK": "1"}, []string{"sub"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateArgvioEnv(t)
+			useLocalArgvio(t) // clears the opt-outs, so set the case's env after it
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			setArgs(t, tc.args...)
+			origClient := argvioClient
+			t.Cleanup(func() { argvioClient = origClient })
+
+			var ran, called bool
+			root := newTestRoot(&ran)
+			defer Instrument(root, "1.0.0", "argv_live_pub_test",
+				WithConfigCustomizedCount(func() (int, bool) { called = true; return 1, true }),
+				WithAuthState(func() (argvio.AuthState, bool) { called = true; return argvio.AuthStateAnonymous, true }),
+			)(context.Background()) //nolint:errcheck
+
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("Execute() error: %v", err)
+			}
+			if called {
+				t.Error("expected the session callbacks not to run")
+			}
+		})
+	}
+}
+
+func TestExecute_RecordsUnknownCommandAndKeepsTheError(t *testing.T) {
+	isolateArgvioEnv(t)
+	var gotErr error
+	_, logs := collectWith(t, nil, func(root *cobra.Command, ctx context.Context) {
+		root.SilenceErrors, root.SilenceUsage = true, true
+		root.SetArgs([]string{"sbu"})
+		gotErr = Execute(root)
+	})
+
+	if gotErr == nil || !strings.HasPrefix(gotErr.Error(), `unknown command "sbu"`) {
+		t.Errorf("expected cobra's unknown command error back unchanged, got %v", gotErr)
+	}
+	if !strings.Contains(logs, "cli.command.unknown") {
+		t.Error("expected an unknown command event")
+	}
+	if strings.Contains(logs, "sbu") {
+		t.Error("expected the text the user typed not to be sent")
+	}
+}
+
+func TestExecute_RunsKnownCommandsAndWorksWithoutInstrument(t *testing.T) {
+	origClient := argvioClient
+	t.Cleanup(func() { argvioClient = origClient })
+	argvioClient = nil
+
+	var ran bool
+	root := newTestRoot(&ran)
+	root.SetArgs([]string{"sub"})
+	if err := Execute(root); err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if !ran {
+		t.Error("expected the subcommand to run")
+	}
+	Duration(context.Background(), "crack.external-tool", time.Second, "")
+	Timer(context.Background(), "openapi.load", "")()
 }
 
 func TestOptedOut(t *testing.T) {
