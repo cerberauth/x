@@ -41,7 +41,9 @@ var argvioNew = argvio.New
 // Failed commands are reported with an error category and, when the error
 // carries one, a reason (see Classified and Reason). Errors returned from a
 // command's RunE and errors passed to Fatal are classified the same way, by the
-// default classifier unless WithClassifier gives another.
+// default classifier unless WithClassifier gives another. A command that
+// panics is reported as failed with category internal, reason "panic" and exit
+// code 2 (never the panic value), then the panic goes on.
 //
 // The returned shutdown function must be called before the process exits,
 // including before any os.Exit. It is always non-nil and safe to call more
@@ -75,6 +77,7 @@ func Instrument(root *cobra.Command, version, apiKey string, opts ...InstrumentO
 	client, _ := argvioNew(apiKey, root.Name(), version, argvioOpts...)
 	argvioClient = client
 	cobrasdk.InstrumentCobra(root, client, cobrasdk.WithErrorClassification(cfg.classifier))
+	capturePanics(root)
 
 	return func(ctx context.Context) error {
 		return client.Shutdown(ctx)
@@ -149,6 +152,45 @@ func WithClassifier(f Classifier) InstrumentOption {
 			c.classifier = f
 		}
 	}
+}
+
+// panicExitCode is the exit code the Go runtime uses for an unrecovered panic.
+const panicExitCode = 2
+
+// errPanic stands in for the value a command panicked with, which is never
+// sent: it may hold user input.
+var errPanic = errors.New("telemetryx: command panicked")
+
+// capturePanics wraps the RunE of every command in root's tree, which
+// InstrumentCobra has already turned every Run into, so that a panic in a
+// command is recorded as a failure of category internal and reason "panic",
+// with exit code 2, and flushed before the panic goes on. Panics in goroutines
+// the command starts are not seen.
+func capturePanics(cmd *cobra.Command) {
+	if inner := cmd.RunE; inner != nil {
+		cmd.RunE = func(c *cobra.Command, args []string) error {
+			defer func() {
+				if r := recover(); r != nil {
+					recordPanic(c)
+					panic(r)
+				}
+			}()
+			return inner(c, args)
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		capturePanics(sub)
+	}
+}
+
+// recordPanic records cmd as failed by a panic and flushes telemetry, since
+// the deferred shutdowns of a crashing process may never run.
+func recordPanic(cmd *cobra.Command) {
+	cobrasdk.RecordExitError(cmd, argvioClient,
+		Classified(errPanic, argvio.ErrorCategoryInternal, "panic"), panicExitCode)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*timeout)
+	defer cancel()
+	_ = argvioClient.Shutdown(ctx)
 }
 
 // argvioClient is the client Instrument set up, for Exit.

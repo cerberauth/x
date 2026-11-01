@@ -543,3 +543,51 @@ func TestOptedOut(t *testing.T) {
 		})
 	}
 }
+
+func TestInstrument_RecordsAPanicFlushesAndRepanics(t *testing.T) {
+	isolateArgvioEnv(t)
+	var mu sync.Mutex
+	var logs []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		if r.URL.Path == "/v1/logs" {
+			logs = append(logs, b...)
+		}
+		mu.Unlock()
+	}))
+	defer srv.Close()
+	useArgvioAt(t, srv.URL)
+	setArgs(t, "sub")
+	origClient := argvioClient
+	t.Cleanup(func() { argvioClient = origClient })
+
+	var ran bool
+	root := newTestRoot(&ran)
+	root.Commands()[0].Run = func(*cobra.Command, []string) { panic("secret-user-input") }
+	shutdown := Instrument(root, "1.0.0", "argv_live_pub_test")
+	defer shutdown(context.Background()) //nolint:errcheck
+
+	root.SetArgs([]string{"sub"})
+	func() {
+		defer func() {
+			if r := recover(); r != "secret-user-input" {
+				t.Errorf("expected the original panic to go on, got %v", r)
+			}
+		}()
+		_ = root.Execute()
+	}()
+
+	// No shutdown call here: the panic handler must have flushed already.
+	mu.Lock()
+	defer mu.Unlock()
+	got := string(logs)
+	for _, want := range []string{"cli.error.raised", "internal", "panic"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in the flushed logs", want)
+		}
+	}
+	if strings.Contains(got, "secret-user-input") {
+		t.Error("expected the panic value not to be sent")
+	}
+}
