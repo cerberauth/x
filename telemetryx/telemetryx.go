@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/cerberauth/x/otelx"
+	"github.com/getargvio/argvio-go"
 )
 
 const (
@@ -23,6 +24,9 @@ const (
 )
 
 var meterProvider *sdkmetric.MeterProvider
+
+// otelShutdown flushes the pipeline New set up, for Exit.
+var otelShutdown func(context.Context) error
 
 // otelxNew is a seam for test injection.
 var otelxNew = otelx.New
@@ -53,6 +57,11 @@ func WithBuildDate(date string) Option {
 // all telemetry, and then re-panics so the runtime still sees the original
 // crash.
 func New(ctx context.Context, serviceName string, version string, opts ...Option) (func(context.Context) error, error) {
+	// Honor the cross-tool DO_NOT_TRACK opt-out, as Instrument does.
+	if argvio.IsDoNotTrackRequested() {
+		return func(context.Context) error { return nil }, nil
+	}
+
 	// Telemetry is best-effort: export failures (e.g. the endpoint being
 	// unreachable) must never be surfaced to the caller. Without this, the
 	// OTel SDK's default error handler logs failed exports via the standard
@@ -86,6 +95,7 @@ func New(ctx context.Context, serviceName string, version string, opts ...Option
 	if err != nil {
 		return nil, err
 	}
+	otelShutdown = internalShutdown
 
 	if mp, ok := otel.GetMeterProvider().(*sdkmetric.MeterProvider); ok {
 		meterProvider = mp
