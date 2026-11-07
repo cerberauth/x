@@ -120,6 +120,19 @@ func TestInstrument_DisabledWithOptOutFlag(t *testing.T) {
 	}
 }
 
+func TestInstrument_DisabledWithoutAPIKey(t *testing.T) {
+	call := useLocalArgvio(t)
+	setArgs(t, "sub")
+
+	var ran bool
+	shutdown := Instrument(newTestRoot(&ran), "1.0.0", "")
+	defer shutdown(context.Background()) //nolint:errcheck
+
+	if !call.client.Disabled() {
+		t.Error("expected client to be disabled when the build has no API key")
+	}
+}
+
 func TestInstrument_CommandsStillRun(t *testing.T) {
 	useLocalArgvio(t)
 	setArgs(t, "sub")
