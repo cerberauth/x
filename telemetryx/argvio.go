@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"time"
 
 	"github.com/getargvio/argvio-go"
 	"github.com/getargvio/argvio-go/cobrasdk"
@@ -41,7 +40,9 @@ var argvioNew = argvio.New
 // Failed commands are reported with an error category and, when the error
 // carries one, a reason (see Classified and Reason). Errors returned from a
 // command's RunE and errors passed to Fatal are classified the same way, by the
-// default classifier unless WithClassifier gives another.
+// default classifier unless WithClassifier gives another. A command that
+// panics is reported as failed with category internal, reason "panic" and exit
+// code 2 (never the panic value), flushed, then the panic goes on.
 //
 // The returned shutdown function must be called before the process exits,
 // including before any os.Exit. It is always non-nil and safe to call more
@@ -215,25 +216,6 @@ func Feature(ctx context.Context, name string) {
 	argvioClient.RecordFeatureActivated(ctx, name)
 }
 
-// Counter adds n to a product counter in Argvio, for a number the CLI itself
-// cares about, such as the OpenAPI operations in a scan. label is an optional
-// second identifier ("" for none). It is a no-op until Instrument has run, when
-// telemetry is disabled, and for n <= 0.
-//
-// WARNING: counters are accepted at the anonymous tier, so they are also sent
-// from CI and when the user granted no consent. name and label must be fixed
-// identifiers chosen in code ("openapi.scheme", "bearer"). Never pass user
-// input, file paths, host names, URLs, tokens or anything derived from them.
-// Argvio does not scrub them; it only drops a name or label that doesn't match
-// ^[a-z0-9][a-z0-9._-]*$ or is longer than 64 bytes.
-func Counter(ctx context.Context, name string, n int64, label string) {
-	var opts []argvio.CounterOption
-	if label != "" {
-		opts = append(opts, argvio.WithLabel(label))
-	}
-	argvioClient.RecordCounter(ctx, name, n, opts...)
-}
-
 // optedOut reports whether args set --sqa-opt-out. The Argvio client has to
 // be built before Cobra parses flags, so the flag is looked up on its own,
 // ignoring every other flag.
@@ -246,35 +228,4 @@ func optedOut(args []string) bool {
 	fs.BoolP("help", "h", false, "")
 	_ = fs.Parse(args)
 	return *optOut
-}
-
-// Duration records how long something took, for timings the command's own
-// duration doesn't cover ("external tool run time"), as a histogram per name,
-// label and command. It is a no-op until Instrument has run, when telemetry is
-// disabled, and for d <= 0.
-//
-// WARNING: durations are accepted at the anonymous tier, so they are also sent
-// from CI and when the user granted no consent. name and label must be fixed
-// identifiers chosen in code ("crack.external-tool", "john"). Never pass user
-// input, file paths, host names, URLs, tokens or anything derived from them;
-// use Vocab for a value read from input. Argvio does not scrub them; it only
-// drops a name or label that doesn't match ^[a-z0-9][a-z0-9._-]*$ or is longer
-// than 64 bytes.
-func Duration(ctx context.Context, name string, d time.Duration, label string) {
-	var opts []argvio.MeasureOption
-	if label != "" {
-		opts = append(opts, argvio.WithMeasureLabel(label))
-	}
-	argvioClient.RecordDuration(ctx, name, d, opts...)
-}
-
-// Timer starts timing and returns a function that records the elapsed time
-// with Duration when called, so it can be deferred:
-//
-//	defer telemetryx.Timer(ctx, "openapi.load", "")()
-//
-// The same rules as Duration apply to name and label.
-func Timer(ctx context.Context, name, label string) func() {
-	start := time.Now()
-	return func() { Duration(ctx, name, time.Since(start), label) }
 }

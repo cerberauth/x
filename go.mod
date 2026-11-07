@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/cerberauth/harnessx v0.5.0
 	github.com/cerberauth/reportx v0.4.0
-	github.com/getargvio/argvio-go v0.4.0
+	github.com/getargvio/argvio-go v0.6.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1

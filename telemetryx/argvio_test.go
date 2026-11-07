@@ -262,14 +262,17 @@ func TestWithClassifier_NilKeepsTheDefault(t *testing.T) {
 }
 
 func TestFeatureAndCounter_AreSafeBeforeInstrumentAndWhenDisabled(t *testing.T) {
-	origClient := argvioClient
-	t.Cleanup(func() { argvioClient = origClient })
+	origClient, origDefault := argvioClient, argvio.Default()
+	t.Cleanup(func() { argvioClient = origClient; argvio.SetDefault(origDefault) })
 	ctx := context.Background()
 
 	// Before Instrument has run there is no client.
 	argvioClient = nil
+	argvio.SetDefault(nil)
+	ops := argvio.NewCounter("openapi.operations")
+	scheme := argvio.NewCounter("openapi.scheme", argvio.Dims("scheme"))
 	Feature(ctx, "crack.john-detected")
-	Counter(ctx, "openapi.operations", 3, "")
+	ops.Add(ctx, 3)
 
 	// With telemetry disabled by the opt-out flag.
 	useLocalArgvio(t)
@@ -277,10 +280,10 @@ func TestFeatureAndCounter_AreSafeBeforeInstrumentAndWhenDisabled(t *testing.T) 
 	var ran bool
 	defer Instrument(newTestRoot(&ran), "1.0.0", "argv_live_pub_test")(ctx) //nolint:errcheck
 	Feature(ctx, "crack.john-detected")
-	Counter(ctx, "openapi.operations", 3, "")
-	Counter(ctx, "openapi.scheme", 1, "bearer")
-	Counter(ctx, "not a valid name", 1, "")
-	Counter(ctx, "openapi.operations", 0, "")
+	ops.Add(ctx, 3)
+	scheme.Add(ctx, 1, "bearer")
+	argvio.NewCounter("not a valid name").Add(ctx, 1)
+	ops.Add(ctx, 0)
 }
 
 // collect runs Instrument against a local collector, calls fn, flushes, and
@@ -305,8 +308,8 @@ func collectWith(t *testing.T, opts []InstrumentOption, fn func(root *cobra.Comm
 
 	useArgvioAt(t, srv.URL)
 	setArgs(t, "sub")
-	origClient := argvioClient
-	t.Cleanup(func() { argvioClient = origClient })
+	origClient, origDefault := argvioClient, argvio.Default()
+	t.Cleanup(func() { argvioClient = origClient; argvio.SetDefault(origDefault) })
 
 	var ran bool
 	root := newTestRoot(&ran)
@@ -325,8 +328,8 @@ func collectWith(t *testing.T, opts []InstrumentOption, fn func(root *cobra.Comm
 func TestFeatureAndCounter_AreSentToTheCollector(t *testing.T) {
 	isolateArgvioEnv(t)
 	metrics, logs := collect(t, func(ctx context.Context) {
-		Counter(ctx, "openapi.scheme", 2, "bearer")
-		Counter(ctx, "Not Valid", 1, "")
+		argvio.NewCounter("openapi.scheme", argvio.Dims("scheme")).Add(ctx, 2, "bearer")
+		argvio.NewCounter("Not Valid").Add(ctx, 1)
 		Feature(ctx, "crack.john-detected")
 	})
 
@@ -349,7 +352,7 @@ func TestFeatureAndCounter_InCIOnlyCountersAreSent(t *testing.T) {
 	isolateArgvioEnv(t)
 	t.Setenv("CI", "true")
 	metrics, logs := collect(t, func(ctx context.Context) {
-		Counter(ctx, "openapi.scheme", 1, "bearer")
+		argvio.NewCounter("openapi.scheme", argvio.Dims("scheme")).Add(ctx, 1, "bearer")
 		Feature(ctx, "crack.john-detected")
 	})
 
@@ -364,13 +367,14 @@ func TestFeatureAndCounter_InCIOnlyCountersAreSent(t *testing.T) {
 func TestDuration_IsSentToTheCollector(t *testing.T) {
 	isolateArgvioEnv(t)
 	metrics, _ := collect(t, func(ctx context.Context) {
-		Duration(ctx, "crack.external-tool", 1500*time.Millisecond, "john")
-		Duration(ctx, "Not Valid", time.Second, "")
-		Duration(ctx, "crack.zero", 0, "")
-		Timer(ctx, "openapi.load", "")()
+		argvio.NewDuration("crack.external-tool", argvio.Dims("tool")).Record(ctx, 1500*time.Millisecond, "john")
+		argvio.NewDuration("Not Valid").Record(ctx, time.Second)
+		argvio.NewDuration("crack.zero").Record(ctx, 0)
+		argvio.NewDuration("openapi.load").Start(ctx)()
+		argvio.NewDuration("openapi.parse", argvio.Dims("format")).StartLate(ctx)("json")
 	})
 
-	for _, want := range []string{"cli.measure", "crack.external-tool", "john", "openapi.load"} {
+	for _, want := range []string{"cli.measure", "crack.external-tool", "cli.dim.tool", "john", "openapi.load", "openapi.parse", "cli.dim.format"} {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("expected the metrics payload to contain %q", want)
 		}
@@ -387,7 +391,7 @@ func TestDuration_InCIIsStillSent(t *testing.T) {
 	isolateArgvioEnv(t)
 	t.Setenv("CI", "true")
 	metrics, _ := collect(t, func(ctx context.Context) {
-		Duration(ctx, "crack.external-tool", time.Second, "")
+		argvio.NewDuration("crack.external-tool").Record(ctx, time.Second)
 	})
 	if !strings.Contains(metrics, "crack.external-tool") {
 		t.Error("expected the duration to be sent from CI")
@@ -501,9 +505,10 @@ func TestExecute_RecordsUnknownCommandAndKeepsTheError(t *testing.T) {
 }
 
 func TestExecute_RunsKnownCommandsAndWorksWithoutInstrument(t *testing.T) {
-	origClient := argvioClient
-	t.Cleanup(func() { argvioClient = origClient })
+	origClient, origDefault := argvioClient, argvio.Default()
+	t.Cleanup(func() { argvioClient = origClient; argvio.SetDefault(origDefault) })
 	argvioClient = nil
+	argvio.SetDefault(nil)
 
 	var ran bool
 	root := newTestRoot(&ran)
@@ -514,8 +519,12 @@ func TestExecute_RunsKnownCommandsAndWorksWithoutInstrument(t *testing.T) {
 	if !ran {
 		t.Error("expected the subcommand to run")
 	}
-	Duration(context.Background(), "crack.external-tool", time.Second, "")
-	Timer(context.Background(), "openapi.load", "")()
+	argvio.NewDuration("crack.external-tool").Record(context.Background(), time.Second)
+	argvio.NewDuration("openapi.load").Start(context.Background())()
+	argvio.NewValue("openapi.operations", argvio.WithUnit(argvio.UnitCount)).Record(context.Background(), 3)
+	argvio.NewCounter("openapi.operations").Add(context.Background(), 3)
+	var nilCounter *argvio.Counter
+	nilCounter.Add(context.Background(), 1)
 }
 
 func TestOptedOut(t *testing.T) {
