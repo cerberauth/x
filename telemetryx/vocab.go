@@ -11,7 +11,7 @@ const vocabOther = "other"
 // without ever sending text a user or a scanned API chose: only the values you
 // list in code can come out.
 //
-//	telemetryx.Counter(ctx, "openapi.scheme", 1, telemetryx.Vocab(s.Scheme, "bearer", "basic"))
+//	schemes.Add(ctx, 1, telemetryx.Vocab(s.Scheme, "bearer", "basic"))
 //
 // allowed must itself be valid Argvio identifiers (^[a-z0-9][a-z0-9._-]*$).
 func Vocab(value string, allowed ...string) string {
