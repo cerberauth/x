@@ -31,7 +31,9 @@ var argvioNew = argvio.New
 // apiKey is the CLI's own public_ingest-scoped Argvio API key, which selects
 // the Argvio tenant its data lands in. It only allows sending usage data, so
 // it is meant to be embedded in the CLI. The telemetry.cerberauth.com
-// collector forwards it to Argvio as is.
+// collector forwards it to Argvio as is. CLIs should not commit it: inject it
+// at release time (go build -ldflags "-X ...") from a CI secret. An empty key
+// disables telemetry, as in local builds.
 //
 // Telemetry is disabled when --sqa-opt-out is passed, as well as by
 // DO_NOT_TRACK or ARGVIO_DISABLED (handled by argvio). Interactive runs
@@ -68,7 +70,10 @@ func Instrument(root *cobra.Command, version, apiKey string, opts ...InstrumentO
 		)),
 	}
 	argvioOpts = append(argvioOpts, cfg.sessionOpt...)
-	if optedOut(os.Args[1:]) {
+	// An empty key means a build the release pipeline didn't inject one into
+	// (a local build, go install): there is nothing to authenticate with, so
+	// report nothing rather than send requests the collector would refuse.
+	if apiKey == "" || optedOut(os.Args[1:]) {
 		argvioOpts = append(argvioOpts, argvio.WithDisabled())
 	}
 
