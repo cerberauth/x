@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/getargvio/argvio-go"
 )
@@ -93,7 +94,7 @@ func categorize(err error) argvio.ErrorCategory {
 		return argvio.ErrorCategoryTimeout
 	case errors.Is(err, context.Canceled):
 		return argvio.ErrorCategoryCanceled
-	case errors.As(err, &netErr):
+	case errors.As(err, &netErr) && !isBareErrno(netErr):
 		if netErr.Timeout() {
 			return argvio.ErrorCategoryTimeout
 		}
@@ -108,6 +109,18 @@ func categorize(err error) argvio.ErrorCategory {
 		}
 	}
 	return argvio.ErrorCategoryUnknown
+}
+
+// isBareErrno reports whether err is a syscall.Errno on its own. Errno has
+// Timeout and Temporary methods, so it satisfies net.Error, and errors.As
+// reaches it by unwrapping the *fs.PathError of a failed file operation.
+// Without this check a missing or unreadable file would be reported as a
+// network error. Real network failures are matched by an outer error that
+// implements net.Error (*net.OpError, *url.Error, *net.DNSError, ...) before
+// the unwrapping gets down to the Errno.
+func isBareErrno(err error) bool {
+	_, ok := err.(syscall.Errno)
+	return ok
 }
 
 // errorFrom returns the error a Fatal call is reporting: the first error among
