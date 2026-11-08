@@ -4,13 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
+	"syscall"
 	"testing"
 
 	"github.com/getargvio/argvio-go"
 )
+
+// openErr returns the error os.Open gives for a path that does not exist: a
+// *fs.PathError wrapping a syscall.Errno, not the bare os.ErrNotExist sentinel.
+func openErr(t *testing.T, path string) error {
+	t.Helper()
+	_, err := os.Open(path)
+	if err == nil {
+		t.Fatalf("%s unexpectedly exists", path)
+	}
+	return err
+}
 
 func TestClassify(t *testing.T) {
 	timeoutErr := &net.DNSError{Err: "i/o timeout", IsTimeout: true}
@@ -28,6 +41,10 @@ func TestClassify(t *testing.T) {
 		{"network error", &net.DNSError{Err: "no such host"}, argvio.ErrorCategoryNetwork, ""},
 		{"url error", &url.Error{Op: "Get", URL: "https://example.com", Err: &net.DNSError{Err: "no such host"}}, argvio.ErrorCategoryNetwork, ""},
 		{"missing file", fmt.Errorf("reading spec: %w", os.ErrNotExist), argvio.ErrorCategoryUser, ""},
+		{"missing file from os.Open", openErr(t, "/nonexistent/spec.json"), argvio.ErrorCategoryUser, ""},
+		{"wrapped missing file from os.Open", fmt.Errorf("reading spec: %w", openErr(t, "/nonexistent/spec.json")), argvio.ErrorCategoryUser, ""},
+		{"directory read as file", &fs.PathError{Op: "read", Path: "dir", Err: syscall.EISDIR}, argvio.ErrorCategoryUnknown, ""},
+		{"connection refused", &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}, argvio.ErrorCategoryNetwork, ""},
 		{"unreadable file", fmt.Errorf("reading spec: %w", os.ErrPermission), argvio.ErrorCategoryUser, ""},
 		{"unknown flag", errors.New("unknown flag: --nope"), argvio.ErrorCategoryUser, ""},
 		{"unknown command", errors.New(`unknown command "x" for "cli"`), argvio.ErrorCategoryUser, ""},
