@@ -148,12 +148,22 @@ func (r *Reporter) recordScanStatus(result harnessx.Result) {
 // finding-worthy record independent of the Data/DataAs[Result] convention —
 // into a reportx.Finding, falling back to the check's CheckDef for the
 // scoring/classification metadata Observation doesn't carry itself.
+// references holds the check's documentation link. reportx reserves
+// Finding.URL for the affected endpoint, and reads the documentation link from
+// References[0] (the SARIF rule helpUri).
+func references(link string) []string {
+	if link == "" {
+		return nil
+	}
+	return []string{link}
+}
+
 func findingFromObservation(obs harnessx.Observation, def checkdef.CheckDef) reportx.Finding {
 	f := reportx.Finding{
 		ID:           obs.Title,
 		Title:        obs.Title,
 		Description:  obs.Description,
-		URL:          def.Link,
+		References:   references(def.Link),
 		CWEID:        def.CWEID,
 		OwaspTop10:   def.OWASP,
 		CVSS40Score:  def.CVSSScore,
@@ -208,13 +218,14 @@ func findingFromResult(pr Result, target string) reportx.Finding {
 		ID:           pr.Name,
 		Title:        pr.Name,
 		Description:  pr.Description,
-		URL:          pr.Link,
+		URL:          target,
+		References:   references(pr.Link),
 		CWEID:        pr.CWEID,
 		OwaspTop10:   pr.OWASP,
 		CVSS40Score:  pr.CVSSScore,
 		CVSS40Vector: pr.CVSSVector,
 		Tags:         pr.Tags,
-		Status:       reportx.StatusActive,
+		Status:       resultStatus(pr),
 		Parameter:    pr.Payload,
 	}
 	if pr.CVSSScore > 0 {
@@ -281,13 +292,31 @@ func (r *Reporter) build(ctx context.Context, target string, results []Result, o
 	return r.deliverVulnerableOnly(ctx, report, vulnerable)
 }
 
+// resultStatus tells report consumers which findings are real: a check that
+// found the target vulnerable is active, one that ran without finding it
+// vulnerable is mitigated. Without this, every check in a report file would
+// read as an active finding.
+func resultStatus(pr Result) reportx.Status {
+	if pr.Vulnerable {
+		return reportx.StatusActive
+	}
+	return reportx.StatusMitigated
+}
+
+// mergeFindings turns observations and check results into findings, along
+// with whether each one is vulnerable. Skipped checks were not tested, so
+// they are not findings: the report's coverage already counts them.
 func mergeFindings(obsFindings []reportx.Finding, results []Result, target string) ([]reportx.Finding, []bool) {
 	findings := append([]reportx.Finding{}, obsFindings...)
 	vulnerable := make([]bool, len(obsFindings))
 	for i := range vulnerable {
 		vulnerable[i] = true
+		findings[i].URL = target
 	}
 	for _, pr := range results {
+		if pr.Skipped {
+			continue
+		}
 		findings = append(findings, findingFromResult(pr, target))
 		vulnerable = append(vulnerable, pr.Vulnerable)
 	}

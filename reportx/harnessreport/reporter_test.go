@@ -80,7 +80,8 @@ func TestReporter_StampsCheckDefMetadata(t *testing.T) {
 	f := mFormatter.report.Findings[0]
 	assert.Equal(t, "Algorithm None", f.ID)
 	assert.Equal(t, "alg=none accepted", f.Description)
-	assert.Equal(t, "https://example.com/alg-none", f.URL)
+	assert.Equal(t, "http://target.example", f.URL)
+	assert.Equal(t, []string{"https://example.com/alg-none"}, f.References)
 	assert.Equal(t, "CWE-345", f.CWEID)
 	assert.Equal(t, "API2:2023", f.OwaspTop10)
 	assert.Equal(t, 9.3, f.CVSS40Score)
@@ -142,8 +143,10 @@ func TestReporter_SkippedCheckDoesNotNeedOnCheckStart(t *testing.T) {
 	r.OnScanComplete(harnessx.ScanSummary{})
 
 	require.NoError(t, r.Err())
-	require.Len(t, mFormatter.report.Findings, 1)
-	assert.Equal(t, "HMAC Confusion", mFormatter.report.Findings[0].ID)
+	// A skipped check was not tested, so it is counted in the coverage
+	// rather than reported as a finding.
+	assert.Empty(t, mFormatter.report.Findings)
+	assert.Equal(t, reportx.Coverage{Skipped: 1}, mFormatter.report.Coverage)
 }
 
 func TestReporter_ObservationsBecomeFindings(t *testing.T) {
@@ -189,6 +192,7 @@ func TestReporter_ObservationsBecomeFindings(t *testing.T) {
 	assert.Equal(t, "CWE-639", f.CWEID)
 	assert.Equal(t, "API1:2023", f.OwaspTop10)
 	assert.Equal(t, []string{"idor"}, f.Tags)
+	assert.Equal(t, []string{"https://example.com/idor"}, f.References)
 	assert.Equal(t, "CAPEC-39", f.Extra["capec_id"])
 	assert.Equal(t, "42", f.Extra["resource_id"])
 	assert.False(t, f.Evidence.IsEmpty())

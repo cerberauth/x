@@ -99,7 +99,9 @@ func TestBuild_EveryFindingOnNonStdoutSink(t *testing.T) {
 	assert.Equal(t, "CheckVulnerable", f.ID)
 	assert.Equal(t, "CheckVulnerable", f.Title)
 	assert.Equal(t, "vulnerable desc", f.Description)
-	assert.Equal(t, "https://example.com/cwe-79", f.URL)
+	// URL is the affected endpoint; the check's docs link goes in References.
+	assert.Equal(t, "http://target-domain.com", f.URL)
+	assert.Equal(t, []string{"https://example.com/cwe-79"}, f.References)
 	assert.Equal(t, "CWE-79", f.CWEID)
 	assert.Equal(t, 7.5, f.CVSS40Score)
 	assert.Equal(t, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", f.CVSS40Vector)
@@ -115,6 +117,32 @@ func TestBuild_EveryFindingOnNonStdoutSink(t *testing.T) {
 	assert.Equal(t, "GET", ev.RequestMethod)
 	assert.Equal(t, "http://target-domain.com", ev.RequestURL)
 	assert.Equal(t, 200, ev.ResponseStatus)
+
+	// The check that ran without finding a vulnerability is marked as such.
+	notVulnerable := mFormatter.report.Findings[1]
+	assert.Equal(t, "CheckNotVulnerable", notVulnerable.ID)
+	assert.Equal(t, reportx.StatusMitigated, notVulnerable.Status)
+}
+
+func TestBuild_SkippedChecksAreNotFindings(t *testing.T) {
+	var buf bytes.Buffer
+	mFormatter := &mockFormatter{}
+
+	r := &Reporter{cfg: Config{
+		ToolName: "my-tool",
+		Sinks:    []Sink{{Formatter: mFormatter, Writer: &buf}},
+	}}
+
+	results := []Result{
+		{Name: "CheckVulnerable", Vulnerable: true},
+		{Name: "CheckSkipped", Skipped: true, SkipReason: "no public key provided"},
+	}
+
+	err := r.build(context.Background(), "", results, nil)
+	require.NoError(t, err)
+
+	require.Len(t, mFormatter.report.Findings, 1)
+	assert.Equal(t, "CheckVulnerable", mFormatter.report.Findings[0].ID)
 }
 
 func TestBuild_OfflineTarget(t *testing.T) {
