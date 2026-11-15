@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/cerberauth/harnessx v0.5.0
-	github.com/cerberauth/reportx v0.4.0
+	github.com/cerberauth/reportx v0.4.1
 	github.com/getargvio/argvio-go v0.6.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.1.0
@@ -39,7 +39,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20261104224025-d1e00e9f33ab // indirect
