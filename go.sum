@@ -4,10 +4,14 @@ github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1x
 github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=
 github.com/cerberauth/harnessx v0.5.0 h1:9XTxMkyLAnMQBkrxB4ZZ9O4Zbf/3u6FYI3TzzVIDvSw=
 github.com/cerberauth/harnessx v0.5.0/go.mod h1:uXaZUv/Ic5PMsxHb2KzMFaTQjWTDftF5r0yYS6Ha22U=
+github.com/cerberauth/harnessx v0.6.0 h1:1qCMiuQg4AHwGTATFmbZaOA28DlYqGj5F1j2Fi1aRZA=
+github.com/cerberauth/harnessx v0.6.0/go.mod h1:uXaZUv/Ic5PMsxHb2KzMFaTQjWTDftF5r0yYS6Ha22U=
 github.com/cerberauth/reportx v0.4.0 h1:Nb+NsC2dvFEj4mUBEVN9jkD9i7++CMpMTqxYBmBbr/I=
 github.com/cerberauth/reportx v0.4.0/go.mod h1:w51Q19ZWF7OJdDmBoSwBVf2DfdcE8t883fEsKwcd0+o=
 github.com/cerberauth/reportx v0.4.1 h1:QV6qD1Ko+/Z+e3zFE4/+8l+rpslKEdmdYU9y5y6q758=
 github.com/cerberauth/reportx v0.4.1/go.mod h1:uqi3NjzOROc9m33RpfOfjyxci0FRslrcWHCBlfdrhrM=
+github.com/cerberauth/reportx v0.5.0 h1:1a/h3+eOpl4ADwLhRRWgqnaNEIacEoUNCkwiLWp0Iy0=
+github.com/cerberauth/reportx v0.5.0/go.mod h1:aK4+Z96yCjTqZ8QjJsfsaoWbAvG7ix7bwQVwvGQkFEc=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
